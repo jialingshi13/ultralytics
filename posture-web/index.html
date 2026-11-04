@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>坐姿与书写姿态</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f3f3;
+      --ink: #1a1a1a;
+      --muted: #5d5d5d;
+      --card: #ffffff;
+      --line: #e5e5e5;
+      --stroke: #d1d1d1;
+      --accent: #0067c0;
+      --accent-hover: #005aab;
+      --ok: #0f7b0f;
+      --ok-bg: #dff6dd;
+      --near: #9d5d00;
+      --near-bg: #fff4ce;
+      --bad: #c42b1c;
+      --bad-bg: #fde7e9;
+      --unknown: #5d5d5d;
+      --unknown-bg: #f0f0f0;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 12px;
+    }
+    body > header {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      height: 40px;
+      padding: 0 8px 0 12px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .brand h1 { margin: 0; font-size: 12px; font-weight: 600; }
+    .brand p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .header-actions { display: flex; gap: 6px; flex: none; }
+    button, select, input.num {
+      font: inherit;
+      color: var(--ink);
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 4px;
+    }
+    button { cursor: pointer; height: 28px; padding: 0 10px; }
+    button:hover { background: #f5f5f5; }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    button.busy { background: var(--bad); border-color: var(--bad); color: #fff; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    main {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(520px, 0.9fr);
+      gap: 8px;
+      padding: 8px;
+    }
+    .stage {
+      position: relative;
+      min-height: 0;
+      height: 100%;
+      background: #1a1a1a;
+      border: 1px solid var(--stroke);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .frame { display: none; }
+    .frame.live { display: block; position: absolute; inset: 0; }
+    .frame video, .frame canvas { position: absolute; display: block; }
+    .frame video { transform: scaleX(-1); background: #1a1a1a; }
+    .frame canvas { touch-action: none; }
+    .stage.counting .frame { filter: brightness(0.55); }
+    #stage-msg, #stage-hint {
+      position: absolute;
+      z-index: 2;
+      margin: 0;
+      color: #f4f7fb;
+      text-align: center;
+      pointer-events: none;
+    }
+    #stage-msg {
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    #stage-msg.count {
+      font-size: min(22vh, 140px);
+      line-height: 1;
+    }
+    #stage-hint {
+      left: 16px;
+      right: 16px;
+      bottom: 14px;
+      font-size: 13px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+    }
+    .panel {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cards, .groups { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .groups { flex: none; }
+    .card, .group, .actions {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+    .card { border-left-width: 2px; padding: 6px 8px 4px; }
+    .card.ok { border-left-color: var(--ok); }
+    .card.near { border-left-color: #d4a017; }
+    .card.bad { border-left-color: var(--bad); }
+    .card.unknown { border-left-color: #b7c3d3; }
+    .card-top, .group-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .card h2, .group h3 { margin: 0; font-size: 14px; font-weight: 700; }
+    .status {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--unknown-bg);
+      color: var(--unknown);
+    }
+    .status.ok { background: var(--ok-bg); color: var(--ok); }
+    .status.near { background: var(--near-bg); color: var(--near); }
+    .status.bad { background: var(--bad-bg); color: var(--bad); }
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px 12px;
+      margin-top: 4px;
+    }
+    .m {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      min-width: 0;
+      font-size: 12.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .m span { color: var(--muted); flex: none; }
+    .m b { font-weight: 700; }
+    .m i { margin-left: auto; font-style: normal; color: var(--muted); }
+    .m.ok i { color: var(--ok); }
+    .m.near i { color: var(--near); }
+    .m.bad i { color: var(--bad); }
+    .note { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 6px 8px;
+    }
+    .action-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+    #notice {
+      margin: 0;
+      flex: none;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+    .legend { margin-left: auto; }
+    .setup .badge { background: var(--unknown-bg); color: var(--ink); }
+    .conf {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1 1 180px;
+      min-width: 160px;
+      margin: 0;
+      font-size: 13px;
+    }
+    .conf input[type="range"] { flex: 1; }
+    .conf .num { width: 4.4em; flex: none; }
+    .legend { display: flex; gap: 10px; color: var(--muted); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 4px; }
+    .legend i { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+    .legend .ok { background: var(--ok); }
+    .legend .near { background: #d4a017; }
+    .legend .bad { background: var(--bad); }
+    .group {
+      display: flex;
+      flex-direction: column;
+      padding: 6px 8px 4px;
+    }
+    .wrist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+    .wrist-grid label.param { grid-template-columns: 3.2em minmax(36px, 1fr) 3.8em; }
+    .badge {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #f0f0f0;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .tol .badge { background: #e8f3fc; color: var(--accent); }
+    .group-note { margin: 2px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    label.param {
+      display: grid;
+      grid-template-columns: 7em minmax(72px, 1fr) 4.1em;
+      gap: 8px;
+      align-items: center;
+      min-height: 26px;
+      margin: 0;
+      font-size: 13px;
+    }
+    label.param > span { white-space: nowrap; }
+    label.param.flash { animation: saved 1.2s ease; border-radius: 6px; }
+    @keyframes saved {
+      from { background: #cfe4f7; }
+      to { background: transparent; }
+    }
+    input[type="range"] { width: 100%; height: 16px; accent-color: var(--accent); }
+    input.num {
+      width: 100%;
+      height: 24px;
+      padding: 0 4px;
+      background: var(--card);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .checks { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 0; }
+    .check { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+    .check select { padding: 4px 8px; }
+    @media (max-width: 1100px) {
+      body { height: auto; min-height: 100%; overflow: auto; }
+      main { display: block; }
+      .stage { height: min(62vh, 520px); margin-bottom: 12px; }
+      .panel { overflow: visible; }
+    }
+    @media (max-width: 720px) {
+      .cards, .groups { grid-template-columns: 1fr; }
+      .wrist-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+    <header>
+    <div class="brand">
+      <h1 id="title"></h1>
+      <p id="subtitle"></p>
+    </div>
+    <div class="header-actions">
+      <button id="lang" class="ghost" type="button"></button>
+      <button id="camera" class="primary" type="button"></button>
+    </div>
+  </header>
+  <main>
+    <section class="stage" id="stage">
+      <div class="frame" id="frame">
+        <video id="live" playsinline autoplay muted></video>
+        <canvas id="view"></canvas>
+      </div>
+      <p id="stage-msg"></p>
+      <p id="stage-hint" hidden data-i18n="dragHint"></p>
+    </section>
+    <form class="panel" id="controls" autocomplete="off">
+      <div class="cards">
+        <article class="card unknown" id="sit-card">
+          <div class="card-top">
+            <h2 id="sit-title"></h2>
+            <div id="sit-status" class="status"></div>
+          </div>
+          <div id="sit-metrics" class="metrics"></div>
+        </article>
+        <article class="card unknown" id="pen-card">
+          <div class="card-top">
+            <h2 id="pen-title"></h2>
+            <div id="pen-status" class="status"></div>
+          </div>
+          <div id="pen-metrics" class="metrics"></div>
+          <p id="pen-note" class="note"></p>
+        </article>
+      </div>
+      <div class="actions">
+        <div class="action-row">
+          <button id="mode-norm" class="primary" type="button" data-i18n="modeNorm"></button>
+          <button id="reset-defaults" type="button" data-i18n="resetDefaults"></button>
+          <div class="legend">
+            <span><i class="ok"></i><span data-i18n="legendOk"></span></span>
+            <span><i class="near"></i><span data-i18n="legendNear"></span></span>
+            <span><i class="bad"></i><span data-i18n="legendBad"></span></span>
+          </div>
+        </div>
+        <p id="notice"></p>
+        <p class="group-note" data-i18n="noteGlobals"></p>
+        <div class="action-row setup">
+          <label class="conf">
+            <span data-i18n="tolScale"></span>
+            <input id="tol_scale" type="range" min="0.5" max="2" step="0.05" value="1.00" />
+            <input class="num" type="number" data-for="tol_scale" min="0.5" max="2" step="0.05" />
+          </label>
+          <label class="conf">
+            <span data-i18n="buffer"></span>
+            <input id="buffer_s" type="range" min="0" max="30" step="1" value="5" />
+            <input class="num" type="number" data-for="buffer_s" min="0" max="30" step="1" />
+          </label>
+          <label class="conf">
+            <span data-i18n="kpt_conf"></span>
+            <input id="kpt_conf" type="range" min="0.05" max="0.95" step="0.05" value="0.5" />
+            <input class="num" type="number" data-for="kpt_conf" min="0.05" max="0.95" step="0.05" />
+          </label>
+          <div class="checks">
+            <label class="check"><span data-i18n="hand"></span>
+              <select id="hand">
+                <option value="auto"></option>
+                <option value="left"></option>
+                <option value="right"></option>
+              </select>
+            </label>
+            <label class="check"><input id="show_guides" type="checkbox" checked /><span data-i18n="guides"></span></label>
+            <label class="check"><input id="show_nodes" type="checkbox" checked /><span data-i18n="nodes"></span></label>
+            <label class="check"><input id="drag_edit" type="checkbox" /><span data-i18n="drag"></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="groups">
+        <section class="group">
+          <div class="group-head">
+            <h3><span class="badge" data-i18n="kindStd"></span><span data-i18n="partSit"></span></h3>
+          </div>
+          <p class="group-note" data-i18n="noteSitStd"></p>
+          <label class="param"><span data-i18n="shoulderTarget"></span><input id="shoulder_target_deg" type="range" min="-80" max="80" step="1" value="0" /><input class="num" type="number" data-for="shoulder_target_deg" min="-80" max="80" step="1" /></label>
+          <label class="param"><span data-i18n="torsoTarget"></span><input id="torso_target_deg" type="range" min="-80" max="80" step="1" value="0" /><input class="num" type="number" data-for="torso_target_deg" min="-80" max="80" step="1" /></label>
+          <label class="param"><span data-i18n="headTarget"></span><input id="head_target_x" type="range" min="-1" max="1" step="0.01" value="0" /><input class="num" type="number" data-for="head_target_x" min="-1" max="1" step="0.01" /></label>
+          <label class="param"><span data-i18n="headDropTarget"></span><input id="head_target_drop" type="range" min="-0.2" max="2" step="0.01" value="0.7" /><input class="num" type="number" data-for="head_target_drop" min="-0.2" max="2" step="0.01" /></label>
+        </section>
+        <section class="group tol">
+          <div class="group-head">
+            <h3><span class="badge" data-i18n="kindTol"></span><span data-i18n="partSit"></span></h3>
+          </div>
+          <p class="group-note" data-i18n="noteSitTol"></p>
+          <label class="param"><span data-i18n="shoulderTol"></span><input id="shoulder_max_deg" type="range" min="1" max="45" step="1" value="12" /><input class="num" type="number" data-for="shoulder_max_deg" min="1" max="45" step="1" /></label>
+          <label class="param"><span data-i18n="torsoTol"></span><input id="torso_max_deg" type="range" min="1" max="45" step="1" value="15" /><input class="num" type="number" data-for="torso_max_deg" min="1" max="45" step="1" /></label>
+          <label class="param"><span data-i18n="headTol"></span><input id="head_max_ratio" type="range" min="0.05" max="1" step="0.01" value="0.35" /><input class="num" type="number" data-for="head_max_ratio" min="0.05" max="1" step="0.01" /></label>
+          <label class="param"><span data-i18n="headDropTol"></span><input id="head_drop_tol" type="range" min="0.02" max="1" step="0.01" value="0.35" /><input class="num" type="number" data-for="head_drop_tol" min="0.02" max="1" step="0.01" /></label>
+        </section>
+        <section class="group">
+          <div class="group-head">
+            <h3><span class="badge" data-i18n="kindStd"></span><span data-i18n="partArm"></span></h3>
+          </div>
+          <p class="group-note" data-i18n="noteArmStd"></p>
+          <label class="param"><span data-i18n="elbowTarget"></span><input id="elbow_target_deg" type="range" min="0" max="180" step="1" value="105" /><input class="num" type="number" data-for="elbow_target_deg" min="0" max="180" step="1" /></label>
+          <label class="param"><span data-i18n="forearmTarget"></span><input id="forearm_target_deg" type="range" min="-180" max="180" step="1" value="0" /><input class="num" type="number" data-for="forearm_target_deg" min="-180" max="180" step="1" /></label>
+          <label class="param"><span data-i18n="wristTargetX"></span><input id="wrist_target_x" type="range" min="-2" max="2.5" step="0.01" value="0" /><input class="num" type="number" data-for="wrist_target_x" min="-2" max="2.5" step="0.01" /></label>
+          <label class="param"><span data-i18n="wristTargetY"></span><input id="wrist_target_y" type="range" min="-2" max="2.5" step="0.01" value="0" /><input class="num" type="number" data-for="wrist_target_y" min="-2" max="2.5" step="0.01" /></label>
+        </section>
+        <section class="group tol">
+          <div class="group-head">
+            <h3><span class="badge" data-i18n="kindTol"></span><span data-i18n="partArm"></span></h3>
+          </div>
+          <p class="group-note" data-i18n="noteArmTol"></p>
+          <label class="param"><span data-i18n="elbowTol"></span><input id="elbow_tol_deg" type="range" min="1" max="90" step="1" value="35" /><input class="num" type="number" data-for="elbow_tol_deg" min="1" max="90" step="1" /></label>
+          <label class="param"><span data-i18n="forearmTol"></span><input id="forearm_tol_deg" type="range" min="1" max="90" step="1" value="25" /><input class="num" type="number" data-for="forearm_tol_deg" min="1" max="90" step="1" /></label>
+          <div class="wrist-grid">
+            <label class="param"><span data-i18n="wristUp"></span><input id="wrist_up" type="range" min="0" max="2.5" step="0.01" value="0" /><input class="num" type="number" data-for="wrist_up" min="0" max="2.5" step="0.01" /></label>
+            <label class="param"><span data-i18n="wristDown"></span><input id="wrist_down" type="range" min="0" max="2.5" step="0.01" value="1.5" /><input class="num" type="number" data-for="wrist_down" min="0" max="2.5" step="0.01" /></label>
+            <label class="param"><span data-i18n="wristLeft"></span><input id="wrist_left" type="range" min="0" max="2.5" step="0.01" value="1" /><input class="num" type="number" data-for="wrist_left" min="0" max="2.5" step="0.01" /></label>
+            <label class="param"><span data-i18n="wristRight"></span><input id="wrist_right" type="range" min="0" max="2.5" step="0.01" value="1" /><input class="num" type="number" data-for="wrist_right" min="0" max="2.5" step="0.01" /></label>
+          </div>
+        </section>
+      </div>
+    </form>
+  </main>
+  <script src="/score.js"></script>
+  <script>
+    const TEXT = {
+      zh: {
+        title: "坐姿与书写姿态",
+        subtitle: "把当前姿势记成标准，再看身体和手臂离开了多少",
+        lang: "English",
+        cameraOn: "打开摄像头",
+        cameraOff: "关闭摄像头",
+        sit: "坐姿",
+        pen: "书写手臂",
+        hand: "书写手",
+        auto: "自动",
+        left: "左手",
+        right: "右手",
+        kindStd: "标准",
+        kindTol: "宽容",
+        kindSetup: "设置",
+        partSit: "坐姿",
+        partArm: "书写手臂",
+        partDetect: "识别",
+        noteSitStd: "低头越大脸越低；头左右以画面右为正。",
+        noteSitTol: "这是 1 倍时的单项宽容，还会再乘总宽容。",
+        noteArmStd: "相对书写肩，沿肩线量，右和下为正，单位是肩宽。",
+        noteArmTol: "四个方向分开限制。向上为 0 时，一抬高即超出。",
+        noteDetect: "置信度越低越容易采到点，也越容易抖。",
+        shoulderTarget: "肩线 °",
+        torsoTarget: "躯干 °",
+        headTarget: "头左右",
+        headDropTarget: "低头",
+        shoulderTol: "肩线 °",
+        torsoTol: "躯干 °",
+        headTol: "头左右",
+        headDropTol: "低头",
+        elbowTarget: "肘角 °",
+        forearmTarget: "前臂 °",
+        wristTargetX: "腕左右",
+        wristTargetY: "腕上下",
+        elbowTol: "肘角 °",
+        forearmTol: "前臂 °",
+        wristUp: "向上",
+        wristDown: "向下",
+        wristLeft: "向左",
+        wristRight: "向右",
+        kpt_conf: "置信度",
+        modeNorm: "记录规范",
+        normCancel: "取消记录",
+        resetDefaults: "恢复默认",
+        noticeIdle: "标准是正确姿势。总宽容把每一项宽容一起放大或缩小。记录规范只改标准。",
+        tolScale: "总宽容",
+        buffer: "缓冲 秒",
+        noteGlobals: "缓冲这几秒里出现过通过或接近，结论就算通过。一直偏离到缓冲结束才算偏离。",
+        normCount: "请保持要记录的姿势，倒数结束后开始采样。",
+        normRecord: "正在记录这一秒里的姿势。",
+        normOverlay: "记录中",
+        normMark: "已记录",
+        normDone: "已用 {n} 帧姿势更新标准",
+        normSitOnly: "已更新坐姿标准。这一秒没有稳定的书写手臂。",
+        normEmpty: "没有采到可靠姿势，标准未改。",
+        normNeedCamera: "请先打开摄像头。",
+        resetDone: "已恢复默认标准和宽容度。",
+        legendOk: "通过",
+        legendNear: "接近",
+        legendBad: "偏离",
+        drag: "画面调整",
+        dragHint: "拖动空心圆，修改肩线、躯干、头左右、低头和腕的标准",
+        penNote: "只判断肩、肘、腕，不判断手指怎么握笔。",
+        guides: "引导线",
+        nodes: "节点",
+        nose: "鼻",
+        lShoulder: "左肩",
+        rShoulder: "右肩",
+        lElbow: "左肘",
+        rElbow: "右肘",
+        lWrist: "左腕",
+        rWrist: "右腕",
+        lHip: "左髋",
+        rHip: "右髋",
+        standard: "标准",
+        shoulderVal: "肩线",
+        torsoVal: "躯干",
+        headVal: "头左右",
+        headDrop: "低头",
+        elbowVal: "肘角",
+        forearmVal: "前臂",
+        wristX: "腕左右",
+        wristY: "腕上下",
+        sit_ok: "通过",
+        sit_near: "接近",
+        sit_bad: "偏离",
+        sit_unknown: "无法判断",
+        pen_ok: "通过",
+        pen_near: "接近",
+        pen_bad: "偏离",
+        pen_unknown: "无法判断",
+        idle: "打开摄像头后开始实时判断",
+        starting: "正在请求摄像头…",
+        denied: "没有摄像头权限，或这台机器没有可用摄像头。",
+        waiting: "正在识别…",
+        warming: "服务正在加载模型，请稍候…",
+        noPerson: "未检测到人",
+        offline: "连不上推理服务",
+      },
+      en: {
+        title: "Sitting and writing posture",
+        subtitle: "Save a pose as the standard, then watch how far the body and arm drift",
+        lang: "中文",
+        cameraOn: "Start camera",
+        cameraOff: "Stop camera",
+        sit: "Sitting",
+        pen: "Writing arm",
+        hand: "Hand",
+        auto: "Auto",
+        left: "Left",
+        right: "Right",
+        kindStd: "Standard",
+        kindTol: "Range",
+        kindSetup: "Setup",
+        partSit: "Sitting",
+        partArm: "Writing arm",
+        partDetect: "Detection",
+        noteSitStd: "A larger chin value means the face is lower. Rightward is positive.",
+        noteSitTol: "Each range is at 1×, then multiplied by all ranges.",
+        noteArmStd: "From the writing shoulder, along the shoulder line; right and down are positive.",
+        noteArmTol: "Up of 0 fails as soon as the wrist rises.",
+        noteDetect: "Lower confidence tracks more points and more jitter.",
+        shoulderTarget: "Shoulder °",
+        torsoTarget: "Torso °",
+        headTarget: "Head side",
+        headDropTarget: "Chin down",
+        shoulderTol: "Shoulder °",
+        torsoTol: "Torso °",
+        headTol: "Head side",
+        headDropTol: "Chin down",
+        elbowTarget: "Elbow °",
+        forearmTarget: "Forearm °",
+        wristTargetX: "Wrist side",
+        wristTargetY: "Wrist high",
+        elbowTol: "Elbow °",
+        forearmTol: "Forearm °",
+        wristUp: "Up",
+        wristDown: "Down",
+        wristLeft: "Left",
+        wristRight: "Right",
+        kpt_conf: "Confidence",
+        modeNorm: "Record standard",
+        normCancel: "Cancel",
+        resetDefaults: "Restore defaults",
+        noticeIdle: "Standards are the correct pose. All ranges scales every tolerance together. Recording changes standards only.",
+        tolScale: "All ranges",
+        buffer: "Grace s",
+        noteGlobals: "Pass or close inside the grace time counts as pass. Off counts only after the grace ends.",
+        normCount: "Hold the pose you want to save. Sampling starts when the count ends.",
+        normRecord: "Recording this second of posture.",
+        normOverlay: "Recording",
+        normMark: "Saved",
+        normDone: "Standard updated from {n} frames",
+        normSitOnly: "Sitting standard updated. No stable writing arm in that second.",
+        normEmpty: "No reliable pose was captured. The standard was left unchanged.",
+        normNeedCamera: "Start the camera first.",
+        resetDone: "Standards and ranges restored to defaults.",
+        legendOk: "Pass",
+        legendNear: "Close",
+        legendBad: "Off",
+        drag: "Pose adjust",
+        dragHint: "Drag the hollow circles to set the shoulder, torso, head side, chin, and wrist",
+        penNote: "Scores shoulder, elbow, and wrist. Fingers are not scored.",
+        guides: "Guides",
+        nodes: "Nodes",
+        nose: "Nose",
+        lShoulder: "L shoulder",
+        rShoulder: "R shoulder",
+        lElbow: "L elbow",
+        rElbow: "R elbow",
+        lWrist: "L wrist",
+        rWrist: "R wrist",
+        lHip: "L hip",
+        rHip: "R hip",
+        standard: "Standard",
+        shoulderVal: "Shoulder",
+        torsoVal: "Torso",
+        headVal: "Head side",
+        headDrop: "Chin",
+        elbowVal: "Elbow",
+        forearmVal: "Forearm",
+        wristX: "Wrist side",
+        wristY: "Wrist high",
+        sit_ok: "Pass",
+        sit_near: "Close",
+        sit_bad: "Off",
+        sit_unknown: "Cannot judge",
+        pen_ok: "Pass",
+        pen_near: "Close",
+        pen_bad: "Off",
+        pen_unknown: "Cannot judge",
+        idle: "Start the camera for a live check",
+        starting: "Requesting the camera…",
+        denied: "Camera permission was denied, or no camera is available.",
+        waiting: "Scoring…",
+        warming: "The server is loading the model…",
+        noPerson: "No person detected",
+        offline: "Inference server is unreachable",
+      },
+    };
+
+    const SKELETON = [
+      [15, 13], [13, 11], [16, 14], [14, 12], [11, 12],
+      [5, 11], [6, 12], [5, 6], [5, 7], [6, 8], [7, 9], [8, 10],
+      [1, 2], [0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6],
+    ];
+    const NODES = [
+      [0, "nose"], [5, "lShoulder"], [6, "rShoulder"], [7, "lElbow"], [8, "rElbow"],
+      [9, "lWrist"], [10, "rWrist"], [11, "lHip"], [12, "rHip"],
+    ];
+    const FIELDS = [
+      "kpt_conf",
+      "shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop",
+      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol",
+      "elbow_target_deg", "forearm_target_deg", "wrist_target_x", "wrist_target_y",
+      "elbow_tol_deg", "forearm_tol_deg",
+      "wrist_up", "wrist_down", "wrist_left", "wrist_right",
+      "tol_scale", "buffer_s",
+    ];
+    const TOL_FIELDS = [
+      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol",
+      "elbow_tol_deg", "forearm_tol_deg",
+      "wrist_up", "wrist_down", "wrist_left", "wrist_right",
+    ];
+    const SIT_KEYS = ["shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop"];
+    const ARM_KEYS = ["elbow_target_deg", "forearm_target_deg", "wrist_target_x", "wrist_target_y"];
+
+    const REMOTE = !/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+    let maxInferW = 640;
+    let jpegQuality = 0.85;
+    const canvas = document.getElementById("view");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("live");
+    const frame = document.getElementById("frame");
+    const grabber = document.createElement("canvas");
+    const grabCtx = grabber.getContext("2d");
+    const stageMsg = document.getElementById("stage-msg");
+    const cameraBtn = document.getElementById("camera");
+    let lang = localStorage.getItem("posture-lang") || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
+    let inferMode = "client";
+    let poseLandmarker = null;
+    let poseLoading = null;
+    let clientTrack = null;
+    let stream = null;
+    let running = false;
+    let normPhase = null;
+    let normTimer = null;
+    let normSamples = [];
+    let normRecordStart = 0;
+    let normRecordEnd = 0;
+    let normInflight = false;
+    let countLeft = 0;
+    let notice = { key: "noticeIdle", n: 0 };
+    let inferBusy = false;
+    let stageHold = 0;
+    let dragId = null;
+    let prevHand = "";
+    let dashOffset = 0;
+    let lastPayload = null;
+    let tolBase = {};
+    const grace = { sit: null, pen: null };
+
+    function t(key) {
+      return TEXT[lang][key];
+    }
+
+    function fill(text, n) {
+      return n ? text.split("{n}").join(String(n)) : text;
+    }
+
+    function setNotice(key, n = 0) {
+      notice = { key, n };
+      document.getElementById("notice").textContent = fill(t(key), n);
+    }
+
+    function editingPose() {
+      return document.getElementById("drag_edit").checked && !normPhase;
+    }
+
+    function syncChrome() {
+      const recording = normPhase === "count" || normPhase === "record" || normPhase === "closing";
+      document.getElementById("stage").classList.toggle("counting", recording);
+      canvas.style.cursor = dragId ? "grabbing" : editingPose() ? "grab" : "default";
+      document.getElementById("stage-hint").hidden = !editingPose();
+      const normBtn = document.getElementById("mode-norm");
+      normBtn.textContent = recording ? t("normCancel") : t("modeNorm");
+      normBtn.classList.toggle("busy", recording);
+    }
+
+    function applyLang() {
+      document.documentElement.lang = lang === "zh" ? "zh" : "en";
+      document.title = t("title");
+      document.getElementById("title").textContent = t("title");
+      document.getElementById("subtitle").textContent = t("subtitle");
+      document.getElementById("lang").textContent = t("lang");
+      document.getElementById("pen-note").textContent = t("penNote");
+      document.querySelector("#hand option[value=auto]").textContent = t("auto");
+      document.querySelector("#hand option[value=left]").textContent = t("left");
+      document.querySelector("#hand option[value=right]").textContent = t("right");
+      cameraBtn.textContent = stream ? t("cameraOff") : t("cameraOn");
+      for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
+      if (normPhase === "count") showCount(String(countLeft));
+      else if (normPhase === "record" || normPhase === "closing") showCount(t("normOverlay"), false);
+      else if (!stream) stageMsg.textContent = t("idle");
+      setNotice(notice.key, notice.n);
+      syncChrome();
+      paintStatus(lastPayload);
+    }
+
+    function readControls() {
+      const data = { hand: document.getElementById("hand").value };
+      for (const name of FIELDS) data[name] = document.getElementById(name).value;
+      return data;
+    }
+
+    function showSliderValues() {
+      for (const name of FIELDS) {
+        const value = document.getElementById(name).value;
+        const num = document.querySelector(`input.num[data-for="${name}"]`);
+        if (num && document.activeElement !== num) num.value = value;
+      }
+    }
+
+    function clampField(name, value) {
+      const range = document.getElementById(name);
+      const num = Number(value);
+      if (!Number.isFinite(num)) return null;
+      const lo = Number(range.min);
+      const hi = Number(range.max);
+      const step = Number(range.step) || 1;
+      const clamped = Math.min(hi, Math.max(lo, num));
+      const snapped = Math.round((clamped - lo) / step) * step + lo;
+      const digits = (String(range.step).split(".")[1] || "").length;
+      return snapped.toFixed(digits);
+    }
+
+    function setField(name, value) {
+      const next = clampField(name, value);
+      if (next == null) return;
+      document.getElementById(name).value = next;
+      showSliderValues();
+      paintStatus(lastPayload);
+    }
+
+    function captureTolBase(name) {
+      const scale = fieldNum("tol_scale") || 1;
+      tolBase[name] = fieldNum(name) / scale;
+    }
+
+    function captureTolBases() {
+      for (const name of TOL_FIELDS) captureTolBase(name);
+    }
+
+    function applyTolScale() {
+      const scale = fieldNum("tol_scale") || 1;
+      for (const name of TOL_FIELDS) {
+        const base = tolBase[name];
+        if (!Number.isFinite(base)) continue;
+        const next = clampField(name, base * scale);
+        if (next != null) document.getElementById(name).value = next;
+      }
+      showSliderValues();
+    }
+
+    function saveControls() {
+      const data = readControls();
+      data.show_guides = document.getElementById("show_guides").checked;
+      data.show_nodes = document.getElementById("show_nodes").checked;
+      data.drag_edit = document.getElementById("drag_edit").checked;
+      data.tol_base = tolBase;
+      localStorage.setItem("posture-thresholds-v2", JSON.stringify(data));
+      showSliderValues();
+      paintStatus(lastPayload);
+    }
+
+    function restoreControls() {
+      try {
+        const saved = JSON.parse(localStorage.getItem("posture-thresholds-v2") || "{}");
+        for (const name of [...FIELDS, "hand"]) {
+          if (saved[name] != null && document.getElementById(name)) document.getElementById(name).value = saved[name];
+        }
+        if (saved.show_guides != null) document.getElementById("show_guides").checked = saved.show_guides;
+        if (saved.show_nodes != null) document.getElementById("show_nodes").checked = saved.show_nodes;
+        if (saved.drag_edit != null) document.getElementById("drag_edit").checked = saved.drag_edit;
+        else if (saved.mode === "edit" || saved.edit_mode) document.getElementById("drag_edit").checked = true;
+        if (saved.tol_base && typeof saved.tol_base === "object") {
+          tolBase = saved.tol_base;
+          applyTolScale();
+        } else captureTolBases();
+      } catch (_err) {
+        captureTolBases();
+      }
+      if (!Object.keys(tolBase).length) captureTolBases();
+      showSliderValues();
+    }
+
+    function bufferedStatus(kind, live) {
+      const windowMs = Math.max(0, fieldNum("buffer_s")) * 1000;
+      const now = performance.now();
+      if (live === "ok" || live === "near") {
+        grace[kind] = null;
+        return "ok";
+      }
+      if (live !== "bad") return "unknown";
+      if (grace[kind] == null) grace[kind] = now;
+      if (windowMs <= 0 || now - grace[kind] >= windowMs) return "bad";
+      return "ok";
+    }
+
+    function setStatus(id, status, label) {
+      const node = document.getElementById(id);
+      node.className = `status ${status || "unknown"}`;
+      node.textContent = label;
+    }
+
+    function bandLevel(offset, limit) {
+      if (offset <= limit) return "ok";
+      if (offset <= limit * 1.2) return "near";
+      return "bad";
+    }
+
+    function metricCell(name, value, target, limit, digits, suffix) {
+      if (value == null || !Number.isFinite(Number(value))) {
+        return `<div class="m unknown"><span>${name}</span><b>—</b><i></i></div>`;
+      }
+      const delta = Number(value) - target;
+      const level = bandLevel(Math.abs(delta), limit);
+      const shown = Number(value).toFixed(digits);
+      const diff = `${delta >= 0 ? "+" : ""}${delta.toFixed(digits)}`;
+      const tip = `${t("standard")} ${Number(target).toFixed(digits)}${suffix}`;
+      return `<div class="m ${level}"><span>${name}</span><b>${shown}${suffix}</b><i title="${tip}">${diff}</i></div>`;
+    }
+
+    function paintStatus(payload) {
+      lastPayload = payload;
+      const sit = (payload && payload.sit) || {};
+      const pen = (payload && payload.pen) || {};
+      const live = payload && payload.person;
+      const sitStatus = live ? bufferedStatus("sit", sit.status || "unknown") : "unknown";
+      const penStatus = live ? bufferedStatus("pen", pen.status || "unknown") : "unknown";
+      document.getElementById("sit-card").className = `card ${sitStatus}`;
+      document.getElementById("pen-card").className = `card ${penStatus}`;
+      document.getElementById("sit-title").textContent = t("sit");
+      document.getElementById("pen-title").textContent = pen.hand ? `${t("pen")} · ${t(pen.hand)}` : t("pen");
+      setStatus("sit-status", sitStatus, t(`sit_${sitStatus}`));
+      setStatus("pen-status", penStatus, t(`pen_${penStatus}`));
+      const shoulderT = fieldNum("shoulder_target_deg");
+      const torsoT = fieldNum("torso_target_deg");
+      const headT = fieldNum("head_target_x");
+      const dropT = fieldNum("head_target_drop");
+      document.getElementById("sit-metrics").innerHTML = [
+        metricCell(t("shoulderVal"), sit.shoulder_deg, shoulderT, fieldNum("shoulder_max_deg"), 1, "°"),
+        metricCell(t("torsoVal"), sit.torso_deg, torsoT, fieldNum("torso_max_deg"), 1, "°"),
+        metricCell(t("headVal"), sit.head_ratio, headT, fieldNum("head_max_ratio"), 2, ""),
+        metricCell(t("headDrop"), sit.head_drop, dropT, fieldNum("head_drop_tol"), 2, ""),
+      ].join("");
+      let xLimit = fieldNum("wrist_right");
+      let yLimit = fieldNum("wrist_down");
+      if (pen.wrist_x != null && pen.wrist_y != null) {
+        const dx = pen.wrist_x - fieldNum("wrist_target_x");
+        const dy = pen.wrist_y - fieldNum("wrist_target_y");
+        xLimit = dx >= 0 ? fieldNum("wrist_right") : fieldNum("wrist_left");
+        yLimit = dy >= 0 ? fieldNum("wrist_down") : fieldNum("wrist_up");
+      }
+      document.getElementById("pen-metrics").innerHTML = [
+        metricCell(t("elbowVal"), pen.elbow_deg, fieldNum("elbow_target_deg"), fieldNum("elbow_tol_deg"), 1, "°"),
+        metricCell(t("forearmVal"), pen.forearm_deg, fieldNum("forearm_target_deg"), fieldNum("forearm_tol_deg"), 1, "°"),
+        metricCell(t("wristX"), pen.wrist_x, fieldNum("wrist_target_x"), xLimit, 2, ""),
+        metricCell(t("wristY"), pen.wrist_y, fieldNum("wrist_target_y"), yLimit, 2, ""),
+      ].join("");
+    }
+
+    const LEVEL_COLOR = { ok: "#2ea85a", near: "#e0b422", bad: "#e23b3b", unknown: "#f4f1ea" };
+
+    function levelColor(level) {
+      return LEVEL_COLOR[level] || LEVEL_COLOR.unknown;
+    }
+
+    function overlayScale() {
+      return canvas.width / 640;
+    }
+
+    function mapPoint(x, y, payload) {
+      return [canvas.width - (x / payload.width) * canvas.width, (y / payload.height) * canvas.height];
+    }
+
+    function visiblePoint(pts, index, minConf) {
+      return pts[index] && pts[index][2] >= minConf;
+    }
+
+    function edgeLevel(a, b, payload) {
+      const levels = payload.levels || {};
+      const pair = (u, v) => (a === u && b === v) || (a === v && b === u);
+      if (pair(5, 6)) return levels.shoulder;
+      if (pair(5, 11) || pair(6, 12)) return levels.torso;
+      const headPts = new Set([0, 1, 2, 3, 4]);
+      if ((headPts.has(a) && headPts.has(b)) || pair(3, 5) || pair(4, 6)) return levels.head;
+      const hand = payload.pen && payload.pen.hand;
+      if (hand === "left" && (pair(5, 7) || pair(7, 9))) return levels.arm;
+      if (hand === "right" && (pair(6, 8) || pair(8, 10))) return levels.arm;
+      return null;
+    }
+
+    function nodeLevel(index, payload) {
+      const levels = payload.levels || {};
+      const hand = payload.pen && payload.pen.hand;
+      if (index <= 4) return levels.head;
+      if (index === 5 || index === 6) return levels.shoulder;
+      if (index === 11 || index === 12) return levels.torso;
+      if (hand === "left" && (index === 7 || index === 9)) return levels.arm;
+      if (hand === "right" && (index === 8 || index === 10)) return levels.arm;
+      return "unknown";
+    }
+
+    function drawSkeleton(payload, pts, minConf) {
+      const scale = overlayScale();
+      ctx.lineWidth = 3 * scale;
+      ctx.lineCap = "round";
+      ctx.setLineDash([]);
+      for (const [a, b] of SKELETON) {
+        if (!visiblePoint(pts, a, minConf) || !visiblePoint(pts, b, minConf)) continue;
+        const level = edgeLevel(a, b, payload);
+        ctx.strokeStyle = level ? levelColor(level) : "#f4f1ea";
+        const p1 = mapPoint(pts[a][0], pts[a][1], payload);
+        const p2 = mapPoint(pts[b][0], pts[b][1], payload);
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.stroke();
+      }
+      const ears = visiblePoint(pts, 3, minConf) && visiblePoint(pts, 4, minConf);
+      const eyes = visiblePoint(pts, 1, minConf) && visiblePoint(pts, 2, minConf);
+      if ((ears || eyes) && visiblePoint(pts, 5, minConf) && visiblePoint(pts, 6, minConf)) {
+        const a = ears ? 3 : 1;
+        const b = ears ? 4 : 2;
+        ctx.strokeStyle = levelColor(payload.levels && payload.levels.head);
+        const head = mapPoint((pts[a][0] + pts[b][0]) / 2, (pts[a][1] + pts[b][1]) / 2, payload);
+        const mid = mapPoint((pts[5][0] + pts[6][0]) / 2, (pts[5][1] + pts[6][1]) / 2, payload);
+        ctx.beginPath();
+        ctx.moveTo(head[0], head[1]);
+        ctx.lineTo(mid[0], mid[1]);
+        ctx.stroke();
+      }
+    }
+
+    function fieldNum(name) {
+      return Number(document.getElementById(name).value);
+    }
+
+    function writingHand(payload) {
+      const chosen = document.getElementById("hand").value;
+      if (chosen === "left" || chosen === "right") return chosen;
+      const seen = payload && payload.pen && payload.pen.hand;
+      if (seen === "left" || seen === "right") return seen;
+      return "";
+    }
+
+    function bodyFrame(left, right) {
+      const vx = right[0] - left[0];
+      const vy = right[1] - left[1];
+      const span = Math.hypot(vx, vy);
+      if (span < 1) return null;
+      const axis = [vx / span, vy / span];
+      const downA = [-axis[1], axis[0]];
+      const downB = [axis[1], -axis[0]];
+      const down = downA[1] >= downB[1] ? downA : downB;
+      return {
+        mid: [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2],
+        span,
+        axis,
+        down,
+      };
+    }
+
+    function guideGeom(payload) {
+      const pts = payload.keypoints;
+      const minConf = fieldNum("kpt_conf");
+      if (!visiblePoint(pts, 5, minConf) || !visiblePoint(pts, 6, minConf)) return null;
+      const left = mapPoint(pts[5][0], pts[5][1], payload);
+      const right = mapPoint(pts[6][0], pts[6][1], payload);
+      const frame = bodyFrame(left, right);
+      if (!frame) return null;
+      const { mid, span, axis, down } = frame;
+      const shoulderRad = (fieldNum("shoulder_target_deg") * Math.PI) / 180;
+      const half = span * 0.7;
+      const shoulderL = [mid[0] - Math.cos(shoulderRad) * half, mid[1] - Math.sin(shoulderRad) * half];
+      const shoulderR = [mid[0] + Math.cos(shoulderRad) * half, mid[1] + Math.sin(shoulderRad) * half];
+      const torsoRad = (fieldNum("torso_target_deg") * Math.PI) / 180;
+      const torsoDown = [-Math.sin(torsoRad), Math.cos(torsoRad)];
+      const axisLen = span * 1.2;
+      const axisBottom = [mid[0] + torsoDown[0] * axisLen, mid[1] + torsoDown[1] * axisLen];
+      const axisTop = [mid[0] - torsoDown[0] * axisLen * 0.85, mid[1] - torsoDown[1] * axisLen * 0.85];
+      const head = [
+        mid[0] + axis[0] * fieldNum("head_target_x") * span,
+        mid[1] + axis[1] * fieldNum("head_target_x") * span,
+      ];
+      const hand = writingHand(payload);
+      const nodes = [
+        { id: "shoulderL", at: shoulderL },
+        { id: "shoulderR", at: shoulderR },
+        { id: "head", at: head },
+        { id: "axis", at: axisBottom },
+      ];
+      const lines = [
+        { a: shoulderL, b: shoulderR },
+        { a: axisTop, b: axisBottom },
+      ];
+      let eyes = null;
+      if (visiblePoint(pts, 1, minConf) && visiblePoint(pts, 2, minConf)) {
+        eyes = bodyFrame(mapPoint(pts[1][0], pts[1][1], payload), mapPoint(pts[2][0], pts[2][1], payload));
+        if (eyes) {
+          const pitch = [
+            eyes.mid[0] + eyes.down[0] * fieldNum("head_target_drop") * eyes.span,
+            eyes.mid[1] + eyes.down[1] * fieldNum("head_target_drop") * eyes.span,
+          ];
+          nodes.push({ id: "pitch", at: pitch });
+          lines.push({ a: eyes.mid, b: pitch });
+        }
+      }
+      if (hand === "left" || hand === "right") {
+        const shoulder = hand === "left" ? left : right;
+        const wrist = [
+          shoulder[0] + axis[0] * fieldNum("wrist_target_x") * span + down[0] * fieldNum("wrist_target_y") * span,
+          shoulder[1] + axis[1] * fieldNum("wrist_target_x") * span + down[1] * fieldNum("wrist_target_y") * span,
+        ];
+        nodes.push({ id: "wrist", at: wrist });
+        const elbowIndex = hand === "left" ? 7 : 8;
+        if (visiblePoint(pts, elbowIndex, minConf)) {
+          lines.push({ a: mapPoint(pts[elbowIndex][0], pts[elbowIndex][1], payload), b: wrist });
+        }
+      }
+      return { mid, span, axis, down, eyes, nodes, lines, hand };
+    }
+
+    function drawGuides(payload) {
+      if (!document.getElementById("show_guides").checked && !document.getElementById("drag_edit").checked) return;
+      const geom = guideGeom(payload);
+      if (!geom) return;
+      const scale = overlayScale();
+      const editing = document.getElementById("drag_edit").checked;
+      dashOffset = (dashOffset + 1) % 28;
+      ctx.save();
+      ctx.setLineDash([8 * scale, 6 * scale]);
+      ctx.lineDashOffset = -dashOffset * scale;
+      ctx.lineWidth = 2 * scale;
+      ctx.strokeStyle = "#f7f4ee";
+      for (const line of geom.lines) {
+        ctx.beginPath();
+        ctx.moveTo(line.a[0], line.a[1]);
+        ctx.lineTo(line.b[0], line.b[1]);
+        ctx.stroke();
+      }
+      ctx.restore();
+      for (const node of geom.nodes) {
+        const radius = (node.id === "wrist" ? 14 : editing ? 11 : 8) * scale;
+        ctx.beginPath();
+        ctx.lineWidth = 2 * scale;
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "#f7f4ee";
+        ctx.fillStyle = "rgba(20, 24, 20, 0.35)";
+        ctx.arc(node.at[0], node.at[1], radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawJointDots(payload, pts, minConf) {
+      const showNodes = document.getElementById("show_nodes").checked;
+      const labeled = new Set(NODES.map(([index]) => index));
+      const scale = overlayScale();
+      for (let i = 0; i < pts.length; i++) {
+        if (!visiblePoint(pts, i, minConf)) continue;
+        const judged = labeled.has(i);
+        const level = nodeLevel(i, payload);
+        const p = mapPoint(pts[i][0], pts[i][1], payload);
+        ctx.beginPath();
+        ctx.fillStyle = judged && level !== "unknown" ? levelColor(level) : "#f4f1ea";
+        ctx.arc(p[0], p[1], (showNodes && judged ? 6 : 4) * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawNodeLabels(payload, pts, minConf) {
+      if (!document.getElementById("show_nodes").checked) return;
+      const hand = payload.pen && payload.pen.hand;
+      const elbowIndex = hand === "left" ? 7 : hand === "right" ? 8 : -1;
+      const scale = overlayScale();
+      ctx.save();
+      ctx.font = `${Math.round(12 * scale)}px Segoe UI, PingFang SC, Microsoft YaHei, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 3 * scale;
+      ctx.strokeStyle = "#141814";
+      for (const [index, key] of NODES) {
+        if (!visiblePoint(pts, index, minConf)) continue;
+        const level = nodeLevel(index, payload);
+        const color = level === "unknown" ? "#f4f1ea" : levelColor(level);
+        let text = t(key);
+        if (index === elbowIndex && payload.pen && payload.pen.elbow_deg != null) {
+          text = `${text} ${payload.pen.elbow_deg}°`;
+        }
+        const p = mapPoint(pts[index][0], pts[index][1], payload);
+        const y = Math.max(12 * scale, p[1] - 16 * scale);
+        ctx.strokeText(text, p[0], y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, p[0], y);
+      }
+      ctx.restore();
+    }
+
+    function fitVideo() {
+      const bounds = frame.getBoundingClientRect();
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh || !bounds.width || !bounds.height) return false;
+      const scale = Math.min(bounds.width / vw, bounds.height / vh);
+      const width = vw * scale;
+      const height = vh * scale;
+      const left = (bounds.width - width) / 2;
+      const top = (bounds.height - height) / 2;
+      if (canvas.width !== vw || canvas.height !== vh) {
+        canvas.width = vw;
+        canvas.height = vh;
+      }
+      for (const el of [video, canvas]) {
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+      }
+      return true;
+    }
+
+    function paint() {
+      if (!running) return;
+      fitVideo();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const payload = lastPayload;
+      if (payload && payload.keypoints && payload.keypoints.length && payload.width && payload.height) {
+        const minConf = Number(document.getElementById("kpt_conf").value);
+        drawSkeleton(payload, payload.keypoints, minConf);
+        drawJointDots(payload, payload.keypoints, minConf);
+        drawNodeLabels(payload, payload.keypoints, minConf);
+        drawGuides(payload);
+      }
+      requestAnimationFrame(paint);
+    }
+
+    function snapshot() {
+      const scale = Math.min(1, maxInferW / video.videoWidth);
+      const w = Math.max(1, Math.round(video.videoWidth * scale));
+      const h = Math.max(1, Math.round(video.videoHeight * scale));
+      if (grabber.width !== w || grabber.height !== h) {
+        grabber.width = w;
+        grabber.height = h;
+      }
+      grabCtx.drawImage(video, 0, 0, w, h);
+      return new Promise((resolve) => grabber.toBlob(resolve, "image/jpeg", jpegQuality));
+    }
+
+    const INFER_TIMEOUT_MS = REMOTE ? 20000 : 8000;
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function loadConfig() {
+      try {
+        const response = await fetch("/config", { signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return;
+        const cfg = await response.json();
+        if (cfg.infer === "server" || cfg.infer === "client") inferMode = cfg.infer;
+        if (inferMode === "server") {
+          const imgsz = Number(cfg.imgsz) || 640;
+          maxInferW = Math.max(480, Math.min(640, imgsz));
+          jpegQuality = 0.85;
+        }
+      } catch (_err) {
+        inferMode = "client";
+      }
+    }
+
+    async function ensurePoseLandmarker() {
+      if (poseLandmarker) return poseLandmarker;
+      if (poseLoading) return poseLoading;
+      poseLoading = (async () => {
+        const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm");
+        const fileset = await vision.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm",
+        );
+        const modelAssetPath =
+          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+        try {
+          poseLandmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath, delegate: "GPU" },
+            runningMode: "VIDEO",
+            numPoses: 1,
+          });
+        } catch (_gpuErr) {
+          poseLandmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath, delegate: "CPU" },
+            runningMode: "VIDEO",
+            numPoses: 1,
+          });
+        }
+        return poseLandmarker;
+      })();
+      try {
+        return await poseLoading;
+      } catch (err) {
+        poseLoading = null;
+        throw err;
+      }
+    }
+
+    async function inferLoopClient() {
+      if (!window.PostureScore) {
+        stageMsg.textContent = t("offline");
+        return;
+      }
+      clientTrack = clientTrack || new PostureScore.PoseTrack();
+      let lastVideoTime = -1;
+      try {
+        stageMsg.textContent = t("warming");
+        await ensurePoseLandmarker();
+        if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("waiting");
+      } catch (_err) {
+        if (running) stageMsg.textContent = t("offline");
+        return;
+      }
+      while (running) {
+        if (video.readyState < 2) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          continue;
+        }
+        if (video.currentTime === lastVideoTime) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          continue;
+        }
+        lastVideoTime = video.currentTime;
+        const snapAt = performance.now();
+        const acceptSample = normAccepts(snapAt);
+        if (acceptSample) normInflight = true;
+        let payload;
+        try {
+          const result = poseLandmarker.detectForVideo(video, performance.now());
+          const width = video.videoWidth;
+          const height = video.videoHeight;
+          const landmarks = result.landmarks && result.landmarks[0];
+          payload = PostureScore.scoreFrame(
+            clientTrack,
+            landmarks,
+            width,
+            height,
+            readControls(),
+            prevHand || null,
+            performance.now() / 1000,
+          );
+        } catch (_err) {
+          if (acceptSample) normInflight = false;
+          if (!running) return;
+          noteNormFrame();
+          if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("offline");
+          await delay(400);
+          continue;
+        }
+        if (acceptSample) normInflight = false;
+        if (!running) return;
+        if (acceptSample) rememberPose(payload);
+        noteNormFrame();
+        lastPayload = payload;
+        if (!normPhase && performance.now() >= stageHold) {
+          stageMsg.textContent = payload.person ? "" : t("noPerson");
+        }
+        prevHand = payload.pen && payload.pen.hand ? payload.pen.hand : "";
+        paintStatus(payload);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    }
+
+    async function inferLoop() {
+      while (running) {
+        if (video.readyState < 2) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          continue;
+        }
+        const blob = await snapshot();
+        if (!running) return;
+        if (!blob) {
+          await delay(200);
+          noteNormFrame();
+          continue;
+        }
+        const snapAt = performance.now();
+        const acceptSample = normAccepts(snapAt);
+        const body = new FormData();
+        body.append("image", blob, "frame.jpg");
+        const controls = readControls();
+        for (const [key, value] of Object.entries(controls)) body.append(key, value);
+        if (controls.hand === "auto" && prevHand && !acceptSample) body.append("prev_hand", prevHand);
+        inferBusy = true;
+        if (acceptSample) normInflight = true;
+        let payload;
+        try {
+          const response = await fetch("/infer", {
+            method: "POST",
+            body,
+            signal: AbortSignal.timeout(INFER_TIMEOUT_MS),
+          });
+          if (response.status === 503) {
+            inferBusy = false;
+            if (acceptSample) normInflight = false;
+            if (!running) return;
+            noteNormFrame();
+            if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("warming");
+            await delay(1000);
+            continue;
+          }
+          if (!response.ok) throw new Error("frame");
+          payload = await response.json();
+        } catch (err) {
+          inferBusy = false;
+          if (acceptSample) normInflight = false;
+          if (!running) return;
+          noteNormFrame();
+          const network = err instanceof TypeError || err.name === "AbortError" || err.name === "TimeoutError";
+          if (network && !normPhase && performance.now() >= stageHold) stageMsg.textContent = t("offline");
+          await delay(REMOTE ? 800 : 400);
+          continue;
+        }
+        inferBusy = false;
+        if (acceptSample) normInflight = false;
+        if (!running) return;
+        if (payload.skipped) {
+          await delay(200);
+          noteNormFrame();
+          continue;
+        }
+        if (acceptSample) rememberPose(payload);
+        noteNormFrame();
+        lastPayload = payload;
+        if (!normPhase && performance.now() >= stageHold) {
+          stageMsg.textContent = payload.person ? "" : t("noPerson");
+        }
+        prevHand = payload.pen && payload.pen.hand ? payload.pen.hand : "";
+        paintStatus(payload);
+      }
+    }
+
+    async function startCamera() {
+      await loadConfig();
+      stageMsg.textContent = t("starting");
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch (_err) {
+        stream = null;
+        stageMsg.textContent = t("denied");
+        return;
+      }
+      video.srcObject = stream;
+      await video.play();
+      running = true;
+      lastPayload = null;
+      frame.classList.add("live");
+      cameraBtn.textContent = t("cameraOff");
+      stageMsg.textContent = t("waiting");
+      requestAnimationFrame(paint);
+      if (inferMode === "client") inferLoopClient();
+      else inferLoop();
+    }
+
+    function stopCamera() {
+      running = false;
+      dragId = null;
+      cancelNorm();
+      if (clientTrack) clientTrack.reset();
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      stream = null;
+      video.srcObject = null;
+      frame.classList.remove("live");
+      prevHand = "";
+      lastPayload = null;
+      grace.sit = null;
+      grace.pen = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      cameraBtn.textContent = t("cameraOn");
+      stageMsg.classList.remove("count");
+      stageMsg.textContent = t("idle");
+      paintStatus(null);
+      syncChrome();
+    }
+
+    function showCount(text, big = true) {
+      stageMsg.textContent = text;
+      stageMsg.classList.toggle("count", big);
+    }
+
+    function clearNormTimer() {
+      if (!normTimer) return;
+      clearInterval(normTimer);
+      clearTimeout(normTimer);
+      normTimer = null;
+    }
+
+    function cancelNorm() {
+      clearNormTimer();
+      normPhase = null;
+      normSamples = [];
+      normRecordStart = 0;
+      normInflight = false;
+      stageMsg.classList.remove("count");
+      document.getElementById("stage").classList.remove("counting");
+    }
+
+    function rememberPose(payload) {
+      if (!payload || !payload.person) return;
+      const sit = payload.sit || {};
+      const pen = payload.pen || {};
+      const hand = pen.hand === "left" || pen.hand === "right" ? pen.hand : null;
+      const sample = {
+        hand,
+        shoulder_target_deg: sit.shoulder_deg,
+        torso_target_deg: sit.torso_deg,
+        head_target_x: sit.head_ratio,
+        head_target_drop: sit.head_drop,
+        elbow_target_deg: hand ? pen.elbow_deg : null,
+        forearm_target_deg: hand ? pen.forearm_deg : null,
+        wrist_target_x: hand ? pen.wrist_x : null,
+        wrist_target_y: hand ? pen.wrist_y : null,
+      };
+      const measured = Object.keys(sample).filter((key) => key !== "hand");
+      if (measured.some((key) => sample[key] != null)) normSamples.push(sample);
+    }
+
+    function recordedHand(samples) {
+      const selected = document.getElementById("hand").value;
+      if (selected === "left" || selected === "right") return selected;
+      const hands = samples.map((sample) => sample.hand).filter((hand) => hand === "left" || hand === "right");
+      if (!hands.length) return null;
+      const last = hands[hands.length - 1];
+      const left = hands.filter((hand) => hand === "left").length;
+      return left === hands.length - left ? last : left > hands.length - left ? "left" : "right";
+    }
+
+    function averageField(samples, key) {
+      const nums = samples
+        .map((sample) => sample[key])
+        .filter((value) => value != null && value !== "")
+        .map(Number)
+        .filter((value) => Number.isFinite(value));
+      if (!nums.length) return false;
+      setField(key, nums.reduce((sum, value) => sum + value, 0) / nums.length);
+      const row = document.getElementById(key).closest(".param");
+      row.classList.remove("flash");
+      void row.offsetWidth;
+      row.classList.add("flash");
+      return true;
+    }
+
+    function normAccepts(snapAt) {
+      if ((normPhase !== "record" && normPhase !== "closing") || !normRecordStart || snapAt < normRecordStart) return false;
+      if (!normSamples.length) return true;
+      return snapAt <= normRecordEnd;
+    }
+
+    function finishNorm() {
+      if (normPhase !== "record" && normPhase !== "closing") return;
+      const samples = normSamples;
+      clearNormTimer();
+      normPhase = null;
+      normSamples = [];
+      normRecordStart = 0;
+      normInflight = false;
+      stageMsg.classList.remove("count");
+      const hand = recordedHand(samples);
+      const armSamples = hand ? samples.filter((sample) => sample.hand === hand) : [];
+      let wroteSit = false;
+      let wroteArm = false;
+      for (const key of SIT_KEYS) wroteSit = averageField(samples, key) || wroteSit;
+      for (const key of ARM_KEYS) wroteArm = averageField(armSamples, key) || wroteArm;
+      if (hand && document.getElementById("hand").value === "auto") {
+        document.getElementById("hand").value = hand;
+        prevHand = hand;
+      }
+      let key = "normEmpty";
+      let n = 0;
+      if (wroteSit || wroteArm) {
+        key = wroteArm ? "normDone" : "normSitOnly";
+        n = wroteArm ? samples.length : 0;
+      }
+      setNotice(key, n);
+      stageMsg.textContent = wroteSit || wroteArm ? t("normMark") : t("normEmpty");
+      stageHold = performance.now() + 1600;
+      syncChrome();
+      saveControls();
+    }
+
+    function noteNormFrame() {
+      if (normPhase !== "record" && normPhase !== "closing") return;
+      const now = performance.now();
+      if (now < normRecordEnd) return;
+      const giveUp = normRecordStart > 0 && now >= normRecordStart + 9000;
+      if (!giveUp && (normInflight || !normSamples.length)) {
+        normPhase = "closing";
+        return;
+      }
+      finishNorm();
+    }
+
+    function watchNorm() {
+      clearNormTimer();
+      normTimer = setTimeout(() => {
+        normTimer = null;
+        if (normPhase !== "record" && normPhase !== "closing") return;
+        if (inferBusy) {
+          watchNorm();
+          return;
+        }
+        noteNormFrame();
+        if (normPhase === "record" || normPhase === "closing") watchNorm();
+      }, 400);
+    }
+
+    function startNormRecord() {
+      prevHand = "";
+      normPhase = "record";
+      normSamples = [];
+      normRecordStart = performance.now();
+      normRecordEnd = normRecordStart + 1000;
+      normInflight = false;
+      showCount(t("normOverlay"), false);
+      setNotice("normRecord");
+      syncChrome();
+      watchNorm();
+    }
+
+    function beginNorm() {
+      cancelNorm();
+      if (!running) {
+        setNotice("normNeedCamera");
+        stageMsg.textContent = t("normNeedCamera");
+        stageHold = performance.now() + 1600;
+        syncChrome();
+        return;
+      }
+      normPhase = "count";
+      countLeft = 5;
+      showCount(String(countLeft));
+      setNotice("normCount");
+      syncChrome();
+      normTimer = setInterval(() => {
+        if (normPhase !== "count") return;
+        countLeft -= 1;
+        if (countLeft > 0) {
+          showCount(String(countLeft));
+          return;
+        }
+        clearNormTimer();
+        startNormRecord();
+      }, 1000);
+    }
+
+    function onNormClick() {
+      if (normPhase) {
+        cancelNorm();
+        if (running) {
+          stageMsg.textContent = lastPayload ? (lastPayload.person ? "" : t("noPerson")) : t("waiting");
+        } else stageMsg.textContent = t("idle");
+        setNotice("noticeIdle");
+        syncChrome();
+        return;
+      }
+      beginNorm();
+    }
+
+    function canvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return [0, 0];
+      return [
+        (event.clientX - rect.left) * (canvas.width / rect.width),
+        (event.clientY - rect.top) * (canvas.height / rect.height),
+      ];
+    }
+
+    function hitNode(point, geom) {
+      const scale = overlayScale();
+      const wrist = geom.nodes.find((node) => node.id === "wrist");
+      if (wrist && Math.hypot(wrist.at[0] - point[0], wrist.at[1] - point[1]) <= 26 * scale) return "wrist";
+      const radius = 20 * scale;
+      let best = null;
+      let bestDist = radius;
+      for (const node of geom.nodes) {
+        if (node.id === "wrist") continue;
+        const dist = Math.hypot(node.at[0] - point[0], node.at[1] - point[1]);
+        if (dist <= bestDist) {
+          best = node.id;
+          bestDist = dist;
+        }
+      }
+      return best;
+    }
+
+    function dragField(id, point, geom) {
+      const dx = point[0] - geom.mid[0];
+      const dy = point[1] - geom.mid[1];
+      const deg = 180 / Math.PI;
+      if (id === "shoulderL") setField("shoulder_target_deg", Math.atan2(-dy, -dx) * deg);
+      else if (id === "shoulderR") setField("shoulder_target_deg", Math.atan2(dy, dx) * deg);
+      else if (id === "head") setField("head_target_x", (dx * geom.axis[0] + dy * geom.axis[1]) / geom.span);
+      else if (id === "pitch" && geom.eyes) {
+        const ex = point[0] - geom.eyes.mid[0];
+        const ey = point[1] - geom.eyes.mid[1];
+        setField("head_target_drop", (ex * geom.eyes.down[0] + ey * geom.eyes.down[1]) / geom.eyes.span);
+      } else if (id === "axis") setField("torso_target_deg", Math.atan2(-dx, dy) * deg);
+      else if (id === "wrist" && lastPayload && lastPayload.keypoints) {
+        const hand = geom.hand || writingHand(lastPayload);
+        if (hand !== "left" && hand !== "right") return;
+        const index = hand === "left" ? 5 : 6;
+        const shoulder = mapPoint(lastPayload.keypoints[index][0], lastPayload.keypoints[index][1], lastPayload);
+        const sx = point[0] - shoulder[0];
+        const sy = point[1] - shoulder[1];
+        setField("wrist_target_x", (sx * geom.axis[0] + sy * geom.axis[1]) / geom.span);
+        setField("wrist_target_y", (sx * geom.down[0] + sy * geom.down[1]) / geom.span);
+      }
+    }
+
+    function resetDefaults() {
+      for (const name of FIELDS) {
+        const range = document.getElementById(name);
+        range.value = range.defaultValue;
+      }
+      document.getElementById("hand").value = "auto";
+      captureTolBases();
+      grace.sit = null;
+      grace.pen = null;
+      saveControls();
+      setNotice("resetDone");
+    }
+
+    document.getElementById("lang").addEventListener("click", () => {
+      lang = lang === "zh" ? "en" : "zh";
+      localStorage.setItem("posture-lang", lang);
+      applyLang();
+    });
+    cameraBtn.addEventListener("click", () => (stream ? stopCamera() : startCamera()));
+    document.getElementById("controls").addEventListener("submit", (event) => event.preventDefault());
+    document.getElementById("controls").addEventListener("input", (event) => {
+      const id = event.target.classList.contains("num") ? event.target.dataset.for : event.target.id;
+      if (event.target.classList.contains("num")) {
+        const next = clampField(id, event.target.value);
+        if (next != null) document.getElementById(id).value = next;
+      }
+      if (id === "tol_scale") applyTolScale();
+      else if (TOL_FIELDS.includes(id)) captureTolBase(id);
+      if (id === "drag_edit") syncChrome();
+      saveControls();
+    });
+    document.getElementById("controls").addEventListener("change", (event) => {
+      if (!event.target.classList.contains("num")) return;
+      const next = clampField(event.target.dataset.for, event.target.value);
+      if (next != null) event.target.value = next;
+      saveControls();
+    });
+    document.getElementById("mode-norm").addEventListener("click", onNormClick);
+    document.getElementById("reset-defaults").addEventListener("click", resetDefaults);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && normPhase) onNormClick();
+    });
+    canvas.addEventListener("pointerdown", (event) => {
+      if (!editingPose() || !lastPayload) return;
+      const geom = guideGeom(lastPayload);
+      if (!geom) return;
+      const id = hitNode(canvasPoint(event), geom);
+      if (!id) return;
+      dragId = id;
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+      event.preventDefault();
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragId || !lastPayload) return;
+      const geom = guideGeom(lastPayload);
+      if (!geom) return;
+      dragField(dragId, canvasPoint(event), geom);
+    });
+    canvas.addEventListener("pointerup", () => {
+      if (!dragId) return;
+      dragId = null;
+      syncChrome();
+      saveControls();
+    });
+    canvas.addEventListener("pointercancel", () => {
+      dragId = null;
+      syncChrome();
+      saveControls();
+    });
+    window.addEventListener("resize", () => {
+      if (running) fitVideo();
+    });
+    (async () => {
+      await loadConfig();
+      restoreControls();
+      applyLang();
+    })();
+  </script>
+</body>
+</html>

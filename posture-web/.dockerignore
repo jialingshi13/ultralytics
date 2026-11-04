@@ -1,0 +1,10 @@
+__pycache__
+*.py[cod]
+.venv
+venv
+*.pt
+.git
+项目说明.md
+render.yaml
+Procfile
+runtime.txt

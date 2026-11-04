@@ -1,0 +1,4 @@
+# Page host. The Render service also installs requirements-server.txt.
+flask>=3.0.1
+gunicorn>=22.0.0
+numpy>=1.23.0
