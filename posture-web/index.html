@@ -425,7 +425,7 @@
         noteSitStd: "低头越大脸越低；头左右以画面右为正。鼻到胸口是鼻子高出胸口多少，变小就是驼背。",
         noteSitTol: "这是 1 倍时的单项宽容，还会再乘总宽容。鼻到胸口只在比标准更低时算偏离。",
         noteArmStd: "相对书写肩，沿肩线量，右和下为正，单位是肩宽。",
-        noteArmTol: "四个方向分开限制。向上为 0 时，一抬高即超出。腕比标准更靠身体中线时，整条手臂仍算通过。",
+        noteArmTol: "四个方向分开限制。向上为 0 时，一抬高即超出。比 0.04 个肩宽或 6° 更小的晃动不算偏离。单帧丢点先保持这只手。腕比标准更靠身体中线时，整条手臂仍算通过。",
         noteDetect: "置信度越低越容易采到点，也越容易抖。",
         shoulderTarget: "肩线 °",
         torsoTarget: "躯干 °",
@@ -528,7 +528,7 @@
         noteSitStd: "A larger chin value means the face is lower. Rightward is positive. Nose–chest is how far the nose sits above the chest; smaller is a hunch.",
         noteSitTol: "Each range is at 1×, then multiplied by all ranges. Nose–chest fails only when lower than the standard.",
         noteArmStd: "From the writing shoulder, along the shoulder line; right and down are positive.",
-        noteArmTol: "Up of 0 fails as soon as the wrist rises. A wrist closer to the midline than the saved standard still passes.",
+        noteArmTol: "Up of 0 fails as soon as the wrist rises. Jitter under 0.04 shoulder-widths or 6° does not count, and one missing frame keeps the same hand. A wrist closer to the midline than the saved standard still passes.",
         noteDetect: "Lower confidence tracks more points and more jitter.",
         shoulderTarget: "Shoulder °",
         torsoTarget: "Torso °",
@@ -848,12 +848,12 @@
       return `<div class="m ${level}"><span>${name}</span><b>${shown}</b><i title="${tip}">${diff}</i></div>`;
     }
 
-    function metricCell(name, value, target, limit, digits, suffix) {
+    function metricCell(name, value, target, limit, digits, suffix, deadband) {
       if (value == null || !Number.isFinite(Number(value))) {
         return `<div class="m unknown"><span>${name}</span><b>—</b><i></i></div>`;
       }
       const delta = Number(value) - target;
-      const level = bandLevel(Math.abs(delta), limit);
+      const level = bandLevel(Math.max(0, Math.abs(delta) - (deadband || 0)), limit);
       const shown = Number(value).toFixed(digits);
       const diff = `${delta >= 0 ? "+" : ""}${delta.toFixed(digits)}`;
       const tip = `${t("standard")} ${Number(target).toFixed(digits)}${suffix}`;
@@ -897,10 +897,10 @@
       const forearmLimit = inward ? 180 : fieldNum("forearm_tol_deg");
       const elbowLimit = inward ? 180 : fieldNum("elbow_tol_deg");
       document.getElementById("pen-metrics").innerHTML = [
-        metricCell(t("elbowVal"), pen.elbow_deg, fieldNum("elbow_target_deg"), elbowLimit, 1, "°"),
-        metricCell(t("forearmVal"), pen.forearm_deg, fieldNum("forearm_target_deg"), forearmLimit, 1, "°"),
-        metricCell(t("wristX"), pen.wrist_x, fieldNum("wrist_target_x"), xLimit, 2, ""),
-        metricCell(t("wristY"), pen.wrist_y, fieldNum("wrist_target_y"), yLimit, 2, ""),
+        metricCell(t("elbowVal"), pen.elbow_deg, fieldNum("elbow_target_deg"), elbowLimit, 1, "°", 6),
+        metricCell(t("forearmVal"), pen.forearm_deg, fieldNum("forearm_target_deg"), forearmLimit, 1, "°", 6),
+        metricCell(t("wristX"), pen.wrist_x, fieldNum("wrist_target_x"), xLimit, 2, "", 0.04),
+        metricCell(t("wristY"), pen.wrist_y, fieldNum("wrist_target_y"), yLimit, 2, "", 0.04),
       ].join("");
     }
 

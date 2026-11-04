@@ -74,10 +74,18 @@ TRACKED = (
 )
 ARMS = {"left": (L_SHOULDER, L_ELBOW, L_WRIST), "right": (R_SHOULDER, R_ELBOW, R_WRIST)}
 HAND_SWITCH_MARGIN = 0.6
-HAND_SWITCH_FRAMES = 3
+HAND_SWITCH_FRAMES = 8
 HOLD_S = 0.3
+ARM_HOLD_S = 0.45
 GAP_S = 1.0
 JUMP_WIDTH = 0.45
+ARM_JUMP = 0.15
+BONE_LO = 0.7
+BONE_HI = 1.35
+BONE_WINDOW = 15
+BONE_READY = 5
+ARM_DEAD_XY = 0.04
+ARM_DEAD_DEG = 6.0
 MIN_BONE = 0.18
 MIN_EYE = 0.08
 # Upper chest sits just below the shoulder midpoint, in shoulder-widths.
@@ -133,7 +141,8 @@ class _Euro:
 class _PointTrack:
     """Smooth one keypoint, hold it briefly, and drop a single-frame jump."""
 
-    def __init__(self):
+    def __init__(self, jump_width=JUMP_WIDTH):
+        self.jump_width = jump_width
         self.fx = _Euro()
         self.fy = _Euro()
         self.xy = None
@@ -149,18 +158,38 @@ class _PointTrack:
         self.seen = None
         self.spike = None
 
+    def snapshot(self):
+        """Copy the accepted point so a bad arm frame can be rewound."""
+        return {
+            "xy": None if self.xy is None else (self.xy[0], self.xy[1]),
+            "conf": self.conf,
+            "seen": self.seen,
+            "spike": None if self.spike is None else (self.spike[0], self.spike[1]),
+            "fx": (self.fx.hat, self.fx.speed, self.fx.t),
+            "fy": (self.fy.hat, self.fy.speed, self.fy.t),
+        }
+
+    def restore(self, snap):
+        """Put back a snapshot taken before this frame was accepted."""
+        self.xy = snap["xy"]
+        self.conf = snap["conf"]
+        self.seen = snap["seen"]
+        self.spike = snap["spike"]
+        self.fx.hat, self.fx.speed, self.fx.t = snap["fx"]
+        self.fy.hat, self.fy.speed, self.fy.t = snap["fy"]
+
     def _holding(self, t):
         return self.xy is not None and self.seen is not None and t - self.seen <= HOLD_S
 
     def _jumped(self, x, y, width):
         if self.xy is None or width < 1e-6:
             return False
-        return math.hypot(x - self.xy[0], y - self.xy[1]) > JUMP_WIDTH * width
+        return math.hypot(x - self.xy[0], y - self.xy[1]) > self.jump_width * width
 
     def _confirms(self, x, y, width):
         if self.spike is None or width < 1e-6:
             return False
-        return math.hypot(x - self.spike[0], y - self.spike[1]) <= JUMP_WIDTH * width
+        return math.hypot(x - self.spike[0], y - self.spike[1]) <= self.jump_width * width
 
     def update(self, t, x, y, conf, min_conf, width):
         if conf < min_conf:
@@ -179,15 +208,45 @@ class _PointTrack:
         return self.xy[0], self.xy[1], self.conf
 
 
+def _median(values):
+    """Middle value of a short bone-length history. Empty history has no median."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _bone_near(length, median):
+    """True when this frame's bone still matches the recent trusted length."""
+    if median is None:
+        return True
+    return BONE_LO * median <= length <= BONE_HI * median
+
+
+def _push_bone(history, length):
+    """Remember one trusted bone length and drop the oldest past the window."""
+    history.append(length)
+    if len(history) > BONE_WINDOW:
+        del history[:-BONE_WINDOW]
+
+
 class PoseTrack:
     """Single-user keypoint smoother. A gap longer than a second starts over."""
 
     def __init__(self):
-        self.points = {index: _PointTrack() for index in TRACKED}
+        self.points = {
+            index: _PointTrack(ARM_JUMP if index in {L_ELBOW, R_ELBOW, L_WRIST, R_WRIST} else JUMP_WIDTH)
+            for index in TRACKED
+        }
         self.t = None
         self.width = 0.0
         self.pending = None
         self.streak = 0
+        self.bones = {name: {"upper": [], "fore": []} for name in ARMS}
+        self.arm_hold = None
 
     def reset(self):
         for track in self.points.values():
@@ -196,6 +255,8 @@ class PoseTrack:
         self.width = 0.0
         self.pending = None
         self.streak = 0
+        self.bones = {name: {"upper": [], "fore": []} for name in ARMS}
+        self.arm_hold = None
 
     def apply(self, kpts, min_conf, now):
         """Return keypoints with smoothed x, y. Unreliable points get confidence 0."""
@@ -204,6 +265,7 @@ class PoseTrack:
         self.t = now
         out = np.array(kpts, dtype=float, copy=True)
         width = self.width
+        snaps = {index: self.points[index].snapshot() for index in (L_ELBOW, R_ELBOW, L_WRIST, R_WRIST)}
         for index, track in self.points.items():
             x, y, conf = (float(v) for v in kpts[index])
             smoothed = track.update(now, x, y, conf, min_conf, width)
@@ -211,6 +273,7 @@ class PoseTrack:
                 out[index, 2] = 0.0
             else:
                 out[index, 0], out[index, 1], out[index, 2] = smoothed
+        self._gate_bones(out, min_conf, snaps)
         left = point(out, L_SHOULDER, min_conf)
         right = point(out, R_SHOULDER, min_conf)
         if left and right:
@@ -219,8 +282,46 @@ class PoseTrack:
                 self.width = dist
         return out
 
+    def _gate_bones(self, out, min_conf, snaps):
+        """Drop an elbow and wrist whose bone lengths leave the recent trusted range."""
+        for name, (shoulder_i, elbow_i, wrist_i) in ARMS.items():
+            shoulder = point(out, shoulder_i, min_conf)
+            elbow = point(out, elbow_i, min_conf)
+            wrist = point(out, wrist_i, min_conf)
+            if shoulder is None or elbow is None or wrist is None:
+                continue
+            upper = segment(shoulder, elbow)
+            fore = segment(elbow, wrist)
+            hist = self.bones[name]
+            ready = len(hist["upper"]) >= BONE_READY and len(hist["fore"]) >= BONE_READY
+            bad = ready and (
+                not _bone_near(upper, _median(hist["upper"])) or not _bone_near(fore, _median(hist["fore"]))
+            )
+            if bad and snaps[elbow_i]["xy"] is not None and snaps[wrist_i]["xy"] is not None:
+                self.points[elbow_i].restore(snaps[elbow_i])
+                self.points[wrist_i].restore(snaps[wrist_i])
+                for index in (elbow_i, wrist_i):
+                    xy = snaps[index]["xy"]
+                    out[index, 0], out[index, 1], out[index, 2] = xy[0], xy[1], snaps[index]["conf"]
+                continue
+            _push_bone(hist["upper"], upper)
+            _push_bone(hist["fore"], fore)
+
+    def remember_arm(self, hand, pts):
+        """Keep the last complete writing arm so one missing frame does not switch hands."""
+        self.arm_hold = {"hand": hand, "pts": [tuple(p) for p in pts], "t": self.t}
+
+    def held_arm(self, hand):
+        """Return the remembered arm while it is still inside the short hold window."""
+        hold = self.arm_hold
+        if hold is None or hold["hand"] != hand or self.t is None or hold["t"] is None:
+            return None
+        if self.t - hold["t"] > ARM_HOLD_S:
+            return None
+        return hold["pts"]
+
     def lock_hand(self, prev_hand, best_name, best_score, prev_score):
-        """Keep the current writing hand until another hand wins three frames in a row."""
+        """Keep the current writing hand until another hand wins eight frames in a row."""
         if not prev_hand or best_name == prev_hand or prev_score is None:
             self.pending = None
             self.streak = 0
@@ -470,7 +571,7 @@ def cross_penalty(name: str, wrist_x: float, left_x: float, right_x: float) -> f
 
 
 def choose_arm(kpts: np.ndarray, hand: str, min_conf: float, prev_hand: str | None):
-    """Pick the writing arm. Auto keeps the previous hand until another wins three frames."""
+    """Pick the writing arm. Auto keeps the previous hand until another wins eight frames."""
     found = {}
     for name, indices in ARMS.items():
         pts = [point(kpts, i, min_conf) for i in indices]
@@ -479,9 +580,14 @@ def choose_arm(kpts: np.ndarray, hand: str, min_conf: float, prev_hand: str | No
     if hand in ARMS:
         TRACK.pending = None
         TRACK.streak = 0
-        return (hand, found[hand]) if hand in found else (None, None)
+        if hand in found:
+            TRACK.remember_arm(hand, found[hand])
+            return hand, found[hand]
+        held = TRACK.held_arm(hand)
+        return (hand, held) if held else (None, None)
     if not found:
-        return None, None
+        held = TRACK.held_arm(prev_hand) if prev_hand else None
+        return (prev_hand, held) if held else (None, None)
 
     left_s = point(kpts, L_SHOULDER, min_conf)
     right_s = point(kpts, R_SHOULDER, min_conf)
@@ -509,14 +615,20 @@ def choose_arm(kpts: np.ndarray, hand: str, min_conf: float, prev_hand: str | No
     if not prev_hand:
         TRACK.pending = None
         TRACK.streak = 0
+        TRACK.remember_arm(best["name"], best["pts"])
         return best["name"], best["pts"]
     current = next((item for item in scored if item["name"] == prev_hand), None)
     if current is None:
+        held = TRACK.held_arm(prev_hand)
+        if held:
+            return prev_hand, held
         TRACK.pending = None
         TRACK.streak = 0
+        TRACK.remember_arm(best["name"], best["pts"])
         return best["name"], best["pts"]
     chosen = TRACK.lock_hand(prev_hand, best["name"], best["score"], current["score"])
     picked = next(item for item in scored if item["name"] == chosen)
+    TRACK.remember_arm(picked["name"], picked["pts"])
     return picked["name"], picked["pts"]
 
 
@@ -553,6 +665,11 @@ def empty_pen() -> dict:
 def empty_levels() -> dict:
     """Per-part closeness. Unknown stays neutral instead of a failure color."""
     return {"shoulder": "unknown", "torso": "unknown", "head": "unknown", "chest": "unknown", "arm": "unknown"}
+
+
+def _soften(offset: float, dead: float) -> float:
+    """Ignore arm motion smaller than the detector noise before applying a limit."""
+    return max(0.0, offset - dead)
 
 
 def band_tol(offset: float, limit: float) -> str:
@@ -650,15 +767,22 @@ def judge(kpts: np.ndarray, limits: dict, prev_hand: str | None = None, frame_w:
                 dx = wrist_x - limits["wrist_target_x"]
                 dy = wrist_y - limits["wrist_target_y"]
                 checks = [
-                    band_tol(max(0.0, -dy), limits["wrist_up"]),
-                    band_tol(max(0.0, dy), limits["wrist_down"]),
-                    band_tol(max(0.0, -dx), limits["wrist_left"]),
-                    band_tol(max(0.0, dx), limits["wrist_right"]),
+                    band_tol(_soften(max(0.0, -dy), ARM_DEAD_XY), limits["wrist_up"]),
+                    band_tol(_soften(max(0.0, dy), ARM_DEAD_XY), limits["wrist_down"]),
+                    band_tol(_soften(max(0.0, -dx), ARM_DEAD_XY), limits["wrist_left"]),
+                    band_tol(_soften(max(0.0, dx), ARM_DEAD_XY), limits["wrist_right"]),
                 ]
             if elbow_deg is not None:
-                checks.append(band_tol(abs(elbow_deg - limits["elbow_target_deg"]), limits["elbow_tol_deg"]))
+                checks.append(
+                    band_tol(_soften(abs(elbow_deg - limits["elbow_target_deg"]), ARM_DEAD_DEG), limits["elbow_tol_deg"])
+                )
             if lean is not None:
-                checks.append(band_tol(angle_delta(lean, limits["forearm_target_deg"]), limits["forearm_tol_deg"]))
+                checks.append(
+                    band_tol(
+                        _soften(angle_delta(lean, limits["forearm_target_deg"]), ARM_DEAD_DEG),
+                        limits["forearm_tol_deg"],
+                    )
+                )
             if checks:
                 levels["arm"] = worst_level(*checks)
         pen = {

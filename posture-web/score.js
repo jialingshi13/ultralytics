@@ -25,10 +25,18 @@
     right: [R_SHOULDER, R_ELBOW, R_WRIST],
   };
   const HAND_SWITCH_MARGIN = 0.6;
-  const HAND_SWITCH_FRAMES = 3;
+  const HAND_SWITCH_FRAMES = 8;
   const HOLD_S = 0.3;
+  const ARM_HOLD_S = 0.45;
   const GAP_S = 1.0;
   const JUMP_WIDTH = 0.45;
+  const ARM_JUMP = 0.15;
+  const BONE_LO = 0.7;
+  const BONE_HI = 1.35;
+  const BONE_WINDOW = 15;
+  const BONE_READY = 5;
+  const ARM_DEAD_XY = 0.04;
+  const ARM_DEAD_DEG = 6;
   const MIN_BONE = 0.18;
   const MIN_EYE = 0.08;
   const CHEST_DROP = 0.42;
@@ -80,7 +88,8 @@
   }
 
   class PointTrack {
-    constructor() {
+    constructor(jumpWidth) {
+      this.jumpWidth = jumpWidth == null ? JUMP_WIDTH : jumpWidth;
       this.fx = new Euro();
       this.fy = new Euro();
       this.xy = null;
@@ -98,18 +107,42 @@
       this.spike = null;
     }
 
+    snapshot() {
+      return {
+        xy: this.xy ? this.xy.slice() : null,
+        conf: this.conf,
+        seen: this.seen,
+        spike: this.spike ? this.spike.slice() : null,
+        fx: { hat: this.fx.hat, speed: this.fx.speed, t: this.fx.t },
+        fy: { hat: this.fy.hat, speed: this.fy.speed, t: this.fy.t },
+      };
+    }
+
+    restore(snap) {
+      this.xy = snap.xy ? snap.xy.slice() : null;
+      this.conf = snap.conf;
+      this.seen = snap.seen;
+      this.spike = snap.spike ? snap.spike.slice() : null;
+      this.fx.hat = snap.fx.hat;
+      this.fx.speed = snap.fx.speed;
+      this.fx.t = snap.fx.t;
+      this.fy.hat = snap.fy.hat;
+      this.fy.speed = snap.fy.speed;
+      this.fy.t = snap.fy.t;
+    }
+
     holding(t) {
       return this.xy != null && this.seen != null && t - this.seen <= HOLD_S;
     }
 
     jumped(x, y, width) {
       if (this.xy == null || width < 1e-6) return false;
-      return Math.hypot(x - this.xy[0], y - this.xy[1]) > JUMP_WIDTH * width;
+      return Math.hypot(x - this.xy[0], y - this.xy[1]) > this.jumpWidth * width;
     }
 
     confirms(x, y, width) {
       if (this.spike == null || width < 1e-6) return false;
-      return Math.hypot(x - this.spike[0], y - this.spike[1]) <= JUMP_WIDTH * width;
+      return Math.hypot(x - this.spike[0], y - this.spike[1]) <= this.jumpWidth * width;
     }
 
     update(t, x, y, conf, minConf, width) {
@@ -130,14 +163,37 @@
     }
   }
 
+  function median(values) {
+    if (!values.length) return null;
+    const ordered = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(ordered.length / 2);
+    if (ordered.length % 2) return ordered[mid];
+    return (ordered[mid - 1] + ordered[mid]) / 2;
+  }
+
+  function boneNear(length, center) {
+    if (center == null) return true;
+    return length >= BONE_LO * center && length <= BONE_HI * center;
+  }
+
+  function pushBone(history, length) {
+    history.push(length);
+    if (history.length > BONE_WINDOW) history.splice(0, history.length - BONE_WINDOW);
+  }
+
   class PoseTrack {
     constructor() {
       this.points = {};
-      for (const index of TRACKED) this.points[index] = new PointTrack();
+      for (const index of TRACKED) {
+        const armPoint = index === L_ELBOW || index === R_ELBOW || index === L_WRIST || index === R_WRIST;
+        this.points[index] = new PointTrack(armPoint ? ARM_JUMP : JUMP_WIDTH);
+      }
       this.t = null;
       this.width = 0.0;
       this.pending = null;
       this.streak = 0;
+      this.bones = { left: { upper: [], fore: [] }, right: { upper: [], fore: [] } };
+      this.armHold = null;
     }
 
     reset() {
@@ -146,6 +202,8 @@
       this.width = 0.0;
       this.pending = null;
       this.streak = 0;
+      this.bones = { left: { upper: [], fore: [] }, right: { upper: [], fore: [] } };
+      this.armHold = null;
     }
 
     apply(kpts, minConf, now) {
@@ -153,6 +211,8 @@
       this.t = now;
       const out = kpts.map((row) => row.slice());
       const width = this.width;
+      const snaps = {};
+      for (const index of [L_ELBOW, R_ELBOW, L_WRIST, R_WRIST]) snaps[index] = this.points[index].snapshot();
       for (const index of TRACKED) {
         const [x, y, conf] = kpts[index];
         const smoothed = this.points[index].update(now, x, y, conf, minConf, width);
@@ -163,6 +223,7 @@
           out[index][2] = smoothed[2];
         }
       }
+      this.gateBones(out, minConf, snaps);
       const left = point(out, L_SHOULDER, minConf);
       const right = point(out, R_SHOULDER, minConf);
       if (left && right) {
@@ -170,6 +231,44 @@
         if (dist >= 1e-6) this.width = dist;
       }
       return out;
+    }
+
+    gateBones(out, minConf, snaps) {
+      for (const [name, indices] of Object.entries(ARMS)) {
+        const [shoulderI, elbowI, wristI] = indices;
+        const shoulder = point(out, shoulderI, minConf);
+        const elbow = point(out, elbowI, minConf);
+        const wrist = point(out, wristI, minConf);
+        if (!shoulder || !elbow || !wrist) continue;
+        const upper = segment(shoulder, elbow);
+        const fore = segment(elbow, wrist);
+        const hist = this.bones[name];
+        const ready = hist.upper.length >= BONE_READY && hist.fore.length >= BONE_READY;
+        const bad = ready && (!boneNear(upper, median(hist.upper)) || !boneNear(fore, median(hist.fore)));
+        if (bad && snaps[elbowI].xy && snaps[wristI].xy) {
+          this.points[elbowI].restore(snaps[elbowI]);
+          this.points[wristI].restore(snaps[wristI]);
+          for (const index of [elbowI, wristI]) {
+            out[index][0] = snaps[index].xy[0];
+            out[index][1] = snaps[index].xy[1];
+            out[index][2] = snaps[index].conf;
+          }
+          continue;
+        }
+        pushBone(hist.upper, upper);
+        pushBone(hist.fore, fore);
+      }
+    }
+
+    rememberArm(hand, pts) {
+      this.armHold = { hand, pts: pts.map((p) => p.slice()), t: this.t };
+    }
+
+    heldArm(hand) {
+      const hold = this.armHold;
+      if (!hold || hold.hand !== hand || this.t == null || hold.t == null) return null;
+      if (this.t - hold.t > ARM_HOLD_S) return null;
+      return hold.pts;
     }
 
     lockHand(prevHand, bestName, bestScore, prevScore) {
@@ -345,6 +444,10 @@
     return { shoulder: "unknown", torso: "unknown", head: "unknown", chest: "unknown", arm: "unknown" };
   }
 
+  function soften(offset, dead) {
+    return Math.max(0, offset - dead);
+  }
+
   function bandTol(offset, limit) {
     if (offset <= limit) return "ok";
     if (offset <= limit * 1.2) return "near";
@@ -367,9 +470,17 @@
     if (hand in ARMS) {
       track.pending = null;
       track.streak = 0;
-      return hand in found ? [hand, found[hand]] : [null, null];
+      if (hand in found) {
+        track.rememberArm(hand, found[hand]);
+        return [hand, found[hand]];
+      }
+      const heldFixed = track.heldArm(hand);
+      return heldFixed ? [hand, heldFixed] : [null, null];
     }
-    if (!Object.keys(found).length) return [null, null];
+    if (!Object.keys(found).length) {
+      const heldNone = prevHand && track.heldArm(prevHand);
+      return heldNone ? [prevHand, heldNone] : [null, null];
+    }
 
     const leftS = point(kpts, L_SHOULDER, minConf);
     const rightS = point(kpts, R_SHOULDER, minConf);
@@ -397,16 +508,22 @@
     if (!prevHand) {
       track.pending = null;
       track.streak = 0;
+      track.rememberArm(best.name, best.pts);
       return [best.name, best.pts];
     }
     const current = scored.find((item) => item.name === prevHand);
     if (!current) {
+      const held = track.heldArm(prevHand);
+      if (held) return [prevHand, held];
       track.pending = null;
       track.streak = 0;
+      track.rememberArm(best.name, best.pts);
       return [best.name, best.pts];
     }
     const chosen = track.lockHand(prevHand, best.name, best.score, current.score);
-    return [chosen, scored.find((item) => item.name === chosen).pts];
+    const picked = scored.find((item) => item.name === chosen);
+    track.rememberArm(picked.name, picked.pts);
+    return [picked.name, picked.pts];
   }
 
   function judge(track, kpts, limits, prevHand, frameW, frameH) {
@@ -497,14 +614,18 @@
           const dx = wristX - limits.wrist_target_x;
           const dy = wristY - limits.wrist_target_y;
           checks.push(
-            bandTol(Math.max(0.0, -dy), limits.wrist_up),
-            bandTol(Math.max(0.0, dy), limits.wrist_down),
-            bandTol(Math.max(0.0, -dx), limits.wrist_left),
-            bandTol(Math.max(0.0, dx), limits.wrist_right),
+            bandTol(soften(Math.max(0.0, -dy), ARM_DEAD_XY), limits.wrist_up),
+            bandTol(soften(Math.max(0.0, dy), ARM_DEAD_XY), limits.wrist_down),
+            bandTol(soften(Math.max(0.0, -dx), ARM_DEAD_XY), limits.wrist_left),
+            bandTol(soften(Math.max(0.0, dx), ARM_DEAD_XY), limits.wrist_right),
           );
         }
-        if (elbowDeg != null) checks.push(bandTol(Math.abs(elbowDeg - limits.elbow_target_deg), limits.elbow_tol_deg));
-        if (lean != null) checks.push(bandTol(angleDelta(lean, limits.forearm_target_deg), limits.forearm_tol_deg));
+        if (elbowDeg != null) {
+          checks.push(bandTol(soften(Math.abs(elbowDeg - limits.elbow_target_deg), ARM_DEAD_DEG), limits.elbow_tol_deg));
+        }
+        if (lean != null) {
+          checks.push(bandTol(soften(angleDelta(lean, limits.forearm_target_deg), ARM_DEAD_DEG), limits.forearm_tol_deg));
+        }
         if (checks.length) levels.arm = worstLevel(...checks);
       }
       pen = {
