@@ -31,6 +31,8 @@
   const JUMP_WIDTH = 0.45;
   const MIN_BONE = 0.18;
   const MIN_EYE = 0.08;
+  const CHEST_DROP = 0.42;
+  const CHEST_MEDIAL = 0.5;
 
   // MediaPipe Pose landmark index -> COCO-17 index.
   const MP_TO_COCO = [
@@ -319,8 +321,27 @@
     return Math.max(0.0, crossed - 0.15);
   }
 
+  function chestXY(hand) {
+    return [hand === "right" ? -CHEST_MEDIAL : CHEST_MEDIAL, CHEST_DROP];
+  }
+
+  function closerToChest(hand, wristX, wristY, targetX, targetY) {
+    if (hand !== "left" && hand !== "right") return false;
+    const [cx, cy] = chestXY(hand);
+    const now = Math.hypot(wristX - cx, wristY - cy);
+    const standard = Math.hypot(targetX - cx, targetY - cy);
+    return now < standard - 0.02;
+  }
+
   function emptySit() {
-    return { status: "unknown", shoulder_deg: null, torso_deg: null, head_ratio: null, head_drop: null };
+    return {
+      status: "unknown",
+      shoulder_deg: null,
+      torso_deg: null,
+      head_ratio: null,
+      head_drop: null,
+      chest_ratio: null,
+    };
   }
 
   function emptyPen() {
@@ -328,7 +349,7 @@
   }
 
   function emptyLevels() {
-    return { shoulder: "unknown", torso: "unknown", head: "unknown", arm: "unknown" };
+    return { shoulder: "unknown", torso: "unknown", head: "unknown", chest: "unknown", arm: "unknown" };
   }
 
   function bandTol(offset, limit) {
@@ -429,6 +450,15 @@
         if (headX != null) headLevels.push(bandTol(Math.abs(headX - limits.head_target_x), limits.head_max_ratio));
         if (pitch != null) headLevels.push(bandTol(Math.abs(pitch - limits.head_target_drop), limits.head_drop_tol));
         if (headLevels.length) levels.head = worstLevel(...headLevels);
+        let chestRatio = null;
+        if (nose && shoulderWidth >= 1e-6) {
+          const chest = [
+            midS[0] + yAxis[0] * CHEST_DROP * shoulderWidth,
+            midS[1] + yAxis[1] * CHEST_DROP * shoulderWidth,
+          ];
+          chestRatio = Math.hypot(nose[0] - chest[0], nose[1] - chest[1]) / shoulderWidth;
+          levels.chest = bandTol(Math.max(0, limits.chest_target - chestRatio), limits.chest_tol);
+        }
         let torsoDeg = null;
         if (
           leftHip &&
@@ -439,11 +469,12 @@
           levels.torso = bandTol(Math.abs(torsoDeg - limits.torso_target_deg), limits.torso_max_deg);
         }
         sit = {
-          status: worstLevel(levels.shoulder, levels.torso, levels.head),
+          status: worstLevel(levels.shoulder, levels.torso, levels.head, levels.chest),
           shoulder_deg: Math.round(shoulderDeg * 10) / 10,
           torso_deg: torsoDeg == null ? null : Math.round(torsoDeg * 10) / 10,
           head_ratio: headX == null ? null : Math.round(headX * 100) / 100,
           head_drop: pitch == null ? null : Math.round(pitch * 100) / 100,
+          chest_ratio: chestRatio == null ? null : Math.round(chestRatio * 100) / 100,
         };
       }
     }
@@ -468,19 +499,24 @@
         [wristX, wristY] = project(shoulder, wrist, xAxis, yAxis, shoulderWidth);
       }
       const checks = [];
+      let closer = false;
       if (wristX != null) {
-        const dx = wristX - limits.wrist_target_x;
-        const dy = wristY - limits.wrist_target_y;
-        checks.push(
-          bandTol(Math.max(0.0, -dy), limits.wrist_up),
-          bandTol(Math.max(0.0, dy), limits.wrist_down),
-          bandTol(Math.max(0.0, -dx), limits.wrist_left),
-          bandTol(Math.max(0.0, dx), limits.wrist_right),
-        );
+        closer = closerToChest(hand, wristX, wristY, limits.wrist_target_x, limits.wrist_target_y);
+        if (!closer) {
+          const dx = wristX - limits.wrist_target_x;
+          const dy = wristY - limits.wrist_target_y;
+          checks.push(
+            bandTol(Math.max(0.0, -dy), limits.wrist_up),
+            bandTol(Math.max(0.0, dy), limits.wrist_down),
+            bandTol(Math.max(0.0, -dx), limits.wrist_left),
+            bandTol(Math.max(0.0, dx), limits.wrist_right),
+          );
+        }
       }
       if (elbowDeg != null) checks.push(bandTol(Math.abs(elbowDeg - limits.elbow_target_deg), limits.elbow_tol_deg));
-      if (lean != null) checks.push(bandTol(angleDelta(lean, limits.forearm_target_deg), limits.forearm_tol_deg));
-      if (checks.length) levels.arm = worstLevel(...checks);
+      if (lean != null && !closer) checks.push(bandTol(angleDelta(lean, limits.forearm_target_deg), limits.forearm_tol_deg));
+      if (closer && !checks.length) levels.arm = "ok";
+      else if (checks.length) levels.arm = worstLevel(...checks);
       pen = {
         status: levels.arm,
         scope: "arm",
@@ -529,6 +565,8 @@
       torso_target_deg: clampNum(controls.torso_target_deg, 0, -80, 80),
       head_target_x: clampNum(controls.head_target_x, 0, -1, 1),
       head_target_drop: clampNum(controls.head_target_drop, 0.7, -0.2, 2),
+      chest_target: clampNum(controls.chest_target, 1.05, 0.3, 2),
+      chest_tol: clampNum(controls.chest_tol, 0.25, 0.05, 1),
       wrist_target_x: clampNum(controls.wrist_target_x, 0, -2, 2.5),
       wrist_target_y: clampNum(controls.wrist_target_y, 0, -2, 2.5),
       wrist_up: clampNum(controls.wrist_up, 0, 0, 2.5),
@@ -573,5 +611,6 @@
     limitsFromControls,
     cocoFromMediaPipe,
     scoreFrame,
+    closerToChest,
   };
 })(typeof window !== "undefined" ? window : globalThis);
