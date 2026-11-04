@@ -82,7 +82,6 @@ MIN_BONE = 0.18
 MIN_EYE = 0.08
 # Upper chest sits just below the shoulder midpoint, in shoulder-widths.
 CHEST_DROP = 0.42
-CHEST_MEDIAL = 0.5
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD
@@ -521,20 +520,17 @@ def choose_arm(kpts: np.ndarray, hand: str, min_conf: float, prev_hand: str | No
     return picked["name"], picked["pts"]
 
 
-def chest_xy(hand: str) -> tuple[float, float]:
-    """Upper chest in the writing-shoulder frame. X is the person's right, Y is down."""
-    medial = -CHEST_MEDIAL if hand == "right" else CHEST_MEDIAL
-    return medial, CHEST_DROP
+def toward_midline(hand: str | None, wrist_x: float, target_x: float) -> bool:
+    """True when the writing wrist has moved at least a little toward the chest.
 
-
-def closer_to_chest(hand: str | None, wrist_x: float, wrist_y: float, target_x: float, target_y: float) -> bool:
-    """True when the wrist is nearer the chest than the saved standard is."""
-    if hand not in ARMS:
-        return False
-    cx, cy = chest_xy(hand)
-    now = math.hypot(wrist_x - cx, wrist_y - cy)
-    standard = math.hypot(target_x - cx, target_y - cy)
-    return now < standard - 0.02
+    Positive X is the person's right. The right hand reaches the chest by moving left,
+    and the left hand reaches it by moving right.
+    """
+    if hand == "right":
+        return target_x - wrist_x >= 0.02
+    if hand == "left":
+        return wrist_x - target_x >= 0.02
+    return False
 
 
 def empty_sit() -> dict:
@@ -545,7 +541,7 @@ def empty_sit() -> dict:
         "torso_deg": None,
         "head_ratio": None,
         "head_drop": None,
-        "chest_ratio": None,
+        "chest_gap": None,
     }
 
 
@@ -612,14 +608,11 @@ def judge(kpts: np.ndarray, limits: dict, prev_hand: str | None = None, frame_w:
                 head_levels.append(band_tol(abs(pitch - limits["head_target_drop"]), limits["head_drop_tol"]))
             if head_levels:
                 levels["head"] = worst_level(*head_levels)
-            chest_ratio = None
+            chest_gap = None
             if nose and shoulder_width >= 1e-6:
-                chest = (
-                    mid_s[0] + y_axis[0] * CHEST_DROP * shoulder_width,
-                    mid_s[1] + y_axis[1] * CHEST_DROP * shoulder_width,
-                )
-                chest_ratio = segment(nose, chest) / shoulder_width
-                levels["chest"] = band_tol(max(0.0, limits["chest_target"] - chest_ratio), limits["chest_tol"])
+                nose_y = project(mid_s, nose, x_axis, y_axis, shoulder_width)[1]
+                chest_gap = CHEST_DROP - nose_y
+                levels["chest"] = band_tol(max(0.0, limits["chest_gap"] - chest_gap), limits["chest_gap_tol"])
             torso_deg = None
             if left_hip and right_hip and hips_reliable(
                 left_hip, right_hip, mid_s, x_axis, y_axis, shoulder_width, frame_w, frame_h
@@ -632,7 +625,7 @@ def judge(kpts: np.ndarray, limits: dict, prev_hand: str | None = None, frame_w:
                 "torso_deg": None if torso_deg is None else round(torso_deg, 1),
                 "head_ratio": None if head_x is None else round(head_x, 2),
                 "head_drop": None if pitch is None else round(pitch, 2),
-                "chest_ratio": None if chest_ratio is None else round(chest_ratio, 2),
+                "chest_gap": None if chest_gap is None else round(chest_gap, 2),
             }
 
     hand, arm = choose_arm(kpts, limits["hand"], min_conf, prev_hand)
@@ -648,11 +641,12 @@ def judge(kpts: np.ndarray, limits: dict, prev_hand: str | None = None, frame_w:
                 elbow_deg = None
                 lean = None
             wrist_x, wrist_y = project(shoulder, wrist, x_axis, y_axis, shoulder_width)
-        checks = []
-        closer = False
-        if wrist_x is not None:
-            closer = closer_to_chest(hand, wrist_x, wrist_y, limits["wrist_target_x"], limits["wrist_target_y"])
-            if not closer:
+        inward = wrist_x is not None and toward_midline(hand, wrist_x, limits["wrist_target_x"])
+        if inward:
+            levels["arm"] = "ok"
+        else:
+            checks = []
+            if wrist_x is not None:
                 dx = wrist_x - limits["wrist_target_x"]
                 dy = wrist_y - limits["wrist_target_y"]
                 checks = [
@@ -661,14 +655,12 @@ def judge(kpts: np.ndarray, limits: dict, prev_hand: str | None = None, frame_w:
                     band_tol(max(0.0, -dx), limits["wrist_left"]),
                     band_tol(max(0.0, dx), limits["wrist_right"]),
                 ]
-        if elbow_deg is not None:
-            checks.append(band_tol(abs(elbow_deg - limits["elbow_target_deg"]), limits["elbow_tol_deg"]))
-        if lean is not None and not closer:
-            checks.append(band_tol(angle_delta(lean, limits["forearm_target_deg"]), limits["forearm_tol_deg"]))
-        if closer and not checks:
-            levels["arm"] = "ok"
-        elif checks:
-            levels["arm"] = worst_level(*checks)
+            if elbow_deg is not None:
+                checks.append(band_tol(abs(elbow_deg - limits["elbow_target_deg"]), limits["elbow_tol_deg"]))
+            if lean is not None:
+                checks.append(band_tol(angle_delta(lean, limits["forearm_target_deg"]), limits["forearm_tol_deg"]))
+            if checks:
+                levels["arm"] = worst_level(*checks)
         pen = {
             "status": levels["arm"],
             "scope": "arm",
@@ -720,8 +712,8 @@ def limits_from_form() -> dict:
         "torso_target_deg": form_float("torso_target_deg", 0, -80, 80),
         "head_target_x": form_float("head_target_x", 0, -1, 1),
         "head_target_drop": form_float("head_target_drop", 0.7, -0.2, 2),
-        "chest_target": form_float("chest_target", 1.05, 0.3, 2),
-        "chest_tol": form_float("chest_tol", 0.25, 0.05, 1),
+        "chest_gap": form_float("chest_gap", 0.9, 0.2, 1.8),
+        "chest_gap_tol": form_float("chest_gap_tol", 0.12, 0.02, 0.6),
         "wrist_target_x": form_float("wrist_target_x", 0, -2, 2.5),
         "wrist_target_y": form_float("wrist_target_y", 0, -2, 2.5),
         "wrist_up": form_float("wrist_up", 0, 0, 2.5),

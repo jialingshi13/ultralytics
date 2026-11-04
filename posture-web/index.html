@@ -361,7 +361,7 @@
           <label class="param"><span data-i18n="torsoTarget"></span><input id="torso_target_deg" type="range" min="-80" max="80" step="1" value="0" /><input class="num" type="number" data-for="torso_target_deg" min="-80" max="80" step="1" /></label>
           <label class="param"><span data-i18n="headTarget"></span><input id="head_target_x" type="range" min="-1" max="1" step="0.01" value="0" /><input class="num" type="number" data-for="head_target_x" min="-1" max="1" step="0.01" /></label>
           <label class="param"><span data-i18n="headDropTarget"></span><input id="head_target_drop" type="range" min="-0.2" max="2" step="0.01" value="0.7" /><input class="num" type="number" data-for="head_target_drop" min="-0.2" max="2" step="0.01" /></label>
-          <label class="param"><span data-i18n="chestTarget"></span><input id="chest_target" type="range" min="0.3" max="2" step="0.01" value="1.05" /><input class="num" type="number" data-for="chest_target" min="0.3" max="2" step="0.01" /></label>
+          <label class="param"><span data-i18n="chestTarget"></span><input id="chest_gap" type="range" min="0.2" max="1.8" step="0.01" value="0.90" /><input class="num" type="number" data-for="chest_gap" min="0.2" max="1.8" step="0.01" /></label>
         </section>
         <section class="group tol">
           <div class="group-head">
@@ -372,7 +372,7 @@
           <label class="param"><span data-i18n="torsoTol"></span><input id="torso_max_deg" type="range" min="1" max="45" step="1" value="15" /><input class="num" type="number" data-for="torso_max_deg" min="1" max="45" step="1" /></label>
           <label class="param"><span data-i18n="headTol"></span><input id="head_max_ratio" type="range" min="0.05" max="1" step="0.01" value="0.35" /><input class="num" type="number" data-for="head_max_ratio" min="0.05" max="1" step="0.01" /></label>
           <label class="param"><span data-i18n="headDropTol"></span><input id="head_drop_tol" type="range" min="0.02" max="1" step="0.01" value="0.35" /><input class="num" type="number" data-for="head_drop_tol" min="0.02" max="1" step="0.01" /></label>
-          <label class="param"><span data-i18n="chestTol"></span><input id="chest_tol" type="range" min="0.05" max="1" step="0.01" value="0.25" /><input class="num" type="number" data-for="chest_tol" min="0.05" max="1" step="0.01" /></label>
+          <label class="param"><span data-i18n="chestTol"></span><input id="chest_gap_tol" type="range" min="0.02" max="0.6" step="0.01" value="0.12" /><input class="num" type="number" data-for="chest_gap_tol" min="0.02" max="0.6" step="0.01" /></label>
         </section>
         <section class="group">
           <div class="group-head">
@@ -422,10 +422,10 @@
         partSit: "坐姿",
         partArm: "书写手臂",
         partDetect: "识别",
-        noteSitStd: "低头越大脸越低；头左右以画面右为正。鼻到胸口越小越驼。",
-        noteSitTol: "这是 1 倍时的单项宽容，还会再乘总宽容。鼻到胸口只在比标准更近时算偏离。",
+        noteSitStd: "低头越大脸越低；头左右以画面右为正。鼻到胸口是鼻子高出胸口多少，变小就是驼背。",
+        noteSitTol: "这是 1 倍时的单项宽容，还会再乘总宽容。鼻到胸口只在比标准更低时算偏离。",
         noteArmStd: "相对书写肩，沿肩线量，右和下为正，单位是肩宽。",
-        noteArmTol: "四个方向分开限制。向上为 0 时，一抬高即超出。比记下的标准更靠近胸口时，腕和前臂仍算通过。",
+        noteArmTol: "四个方向分开限制。向上为 0 时，一抬高即超出。腕比标准更靠身体中线时，整条手臂仍算通过。",
         noteDetect: "置信度越低越容易采到点，也越容易抖。",
         shoulderTarget: "肩线 °",
         torsoTarget: "躯干 °",
@@ -525,10 +525,10 @@
         partSit: "Sitting",
         partArm: "Writing arm",
         partDetect: "Detection",
-        noteSitStd: "A larger chin value means the face is lower. Rightward is positive. A smaller nose–chest distance is a hunch.",
-        noteSitTol: "Each range is at 1×, then multiplied by all ranges. Nose–chest fails only when closer than the standard.",
+        noteSitStd: "A larger chin value means the face is lower. Rightward is positive. Nose–chest is how far the nose sits above the chest; smaller is a hunch.",
+        noteSitTol: "Each range is at 1×, then multiplied by all ranges. Nose–chest fails only when lower than the standard.",
         noteArmStd: "From the writing shoulder, along the shoulder line; right and down are positive.",
-        noteArmTol: "Up of 0 fails as soon as the wrist rises. Moving closer to the chest than the saved standard still passes.",
+        noteArmTol: "Up of 0 fails as soon as the wrist rises. A wrist closer to the midline than the saved standard still passes.",
         noteDetect: "Lower confidence tracks more points and more jitter.",
         shoulderTarget: "Shoulder °",
         torsoTarget: "Torso °",
@@ -623,19 +623,19 @@
     ];
     const FIELDS = [
       "kpt_conf",
-      "shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop", "chest_target",
-      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol", "chest_tol",
+      "shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop", "chest_gap",
+      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol", "chest_gap_tol",
       "elbow_target_deg", "forearm_target_deg", "wrist_target_x", "wrist_target_y",
       "elbow_tol_deg", "forearm_tol_deg",
       "wrist_up", "wrist_down", "wrist_left", "wrist_right",
       "tol_scale", "buffer_s",
     ];
     const TOL_FIELDS = [
-      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol", "chest_tol",
+      "shoulder_max_deg", "torso_max_deg", "head_max_ratio", "head_drop_tol", "chest_gap_tol",
       "elbow_tol_deg", "forearm_tol_deg",
       "wrist_up", "wrist_down", "wrist_left", "wrist_right",
     ];
-    const SIT_KEYS = ["shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop", "chest_target"];
+    const SIT_KEYS = ["shoulder_target_deg", "torso_target_deg", "head_target_x", "head_target_drop", "chest_gap"];
     const ARM_KEYS = ["elbow_target_deg", "forearm_target_deg", "wrist_target_x", "wrist_target_y"];
 
     const REMOTE = !/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
@@ -882,21 +882,22 @@
         metricCell(t("torsoVal"), sit.torso_deg, torsoT, fieldNum("torso_max_deg"), 1, "°"),
         metricCell(t("headVal"), sit.head_ratio, headT, fieldNum("head_max_ratio"), 2, ""),
         metricCell(t("headDrop"), sit.head_drop, dropT, fieldNum("head_drop_tol"), 2, ""),
-        metricFloor(t("chestVal"), sit.chest_ratio, fieldNum("chest_target"), fieldNum("chest_tol"), 2),
+        metricFloor(t("chestVal"), sit.chest_gap, fieldNum("chest_gap"), fieldNum("chest_gap_tol"), 2),
       ].join("");
-      const closer = pen.hand && pen.wrist_x != null && window.PostureScore
-        && PostureScore.closerToChest(pen.hand, pen.wrist_x, pen.wrist_y, fieldNum("wrist_target_x"), fieldNum("wrist_target_y"));
+      const inward = pen.hand && pen.wrist_x != null && window.PostureScore
+        && PostureScore.towardMidline(pen.hand, pen.wrist_x, fieldNum("wrist_target_x"));
       let xLimit = fieldNum("wrist_right");
       let yLimit = fieldNum("wrist_down");
       if (pen.wrist_x != null && pen.wrist_y != null) {
         const dx = pen.wrist_x - fieldNum("wrist_target_x");
         const dy = pen.wrist_y - fieldNum("wrist_target_y");
-        xLimit = closer ? 99 : dx >= 0 ? fieldNum("wrist_right") : fieldNum("wrist_left");
-        yLimit = closer ? 99 : dy >= 0 ? fieldNum("wrist_down") : fieldNum("wrist_up");
+        xLimit = inward ? 99 : dx >= 0 ? fieldNum("wrist_right") : fieldNum("wrist_left");
+        yLimit = inward ? 99 : dy >= 0 ? fieldNum("wrist_down") : fieldNum("wrist_up");
       }
-      const forearmLimit = closer ? 180 : fieldNum("forearm_tol_deg");
+      const forearmLimit = inward ? 180 : fieldNum("forearm_tol_deg");
+      const elbowLimit = inward ? 180 : fieldNum("elbow_tol_deg");
       document.getElementById("pen-metrics").innerHTML = [
-        metricCell(t("elbowVal"), pen.elbow_deg, fieldNum("elbow_target_deg"), fieldNum("elbow_tol_deg"), 1, "°"),
+        metricCell(t("elbowVal"), pen.elbow_deg, fieldNum("elbow_target_deg"), elbowLimit, 1, "°"),
         metricCell(t("forearmVal"), pen.forearm_deg, fieldNum("forearm_target_deg"), forearmLimit, 1, "°"),
         metricCell(t("wristX"), pen.wrist_x, fieldNum("wrist_target_x"), xLimit, 2, ""),
         metricCell(t("wristY"), pen.wrist_y, fieldNum("wrist_target_y"), yLimit, 2, ""),
@@ -1481,7 +1482,7 @@
         torso_target_deg: sit.torso_deg,
         head_target_x: sit.head_ratio,
         head_target_drop: sit.head_drop,
-        chest_target: sit.chest_ratio,
+        chest_gap: sit.chest_gap,
         elbow_target_deg: hand ? pen.elbow_deg : null,
         forearm_target_deg: hand ? pen.forearm_deg : null,
         wrist_target_x: hand ? pen.wrist_x : null,
