@@ -57,7 +57,8 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .header-actions { display: flex; gap: 6px; flex: none; }
+    .header-actions { display: flex; gap: 6px; flex: none; align-items: center; }
+    #camera-device { height: 28px; max-width: 220px; padding: 0 4px; cursor: pointer; }
     button, select, input.num {
       font: inherit;
       color: var(--ink);
@@ -279,6 +280,7 @@
     </div>
     <div class="header-actions">
       <button id="lang" class="ghost" type="button"></button>
+      <select id="camera-device"></select>
       <button id="camera" class="primary" type="button"></button>
     </div>
   </header>
@@ -410,6 +412,9 @@
         lang: "English",
         cameraOn: "打开摄像头",
         cameraOff: "关闭摄像头",
+        cameraPick: "摄像头",
+        cameraDefault: "默认摄像头",
+        cameraN: "摄像头 {n}",
         sit: "坐姿",
         pen: "书写手臂",
         hand: "书写手",
@@ -513,6 +518,9 @@
         lang: "中文",
         cameraOn: "Start camera",
         cameraOff: "Stop camera",
+        cameraPick: "Camera",
+        cameraDefault: "Default",
+        cameraN: "Camera {n}",
         sit: "Sitting",
         pen: "Writing arm",
         hand: "Hand",
@@ -649,6 +657,8 @@
     const grabCtx = grabber.getContext("2d");
     const stageMsg = document.getElementById("stage-msg");
     const cameraBtn = document.getElementById("camera");
+    const cameraSelect = document.getElementById("camera-device");
+    const CAMERA_KEY = "posture-camera";
     let lang = localStorage.getItem("posture-lang") || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
     let inferMode = "client";
     let poseLandmarker = null;
@@ -656,6 +666,10 @@
     let clientTrack = null;
     let stream = null;
     let running = false;
+    let cameraSession = 0;
+    let fillingCameras = false;
+    let camerasKnown = false;
+    let revealing = null;
     let normPhase = null;
     let normTimer = null;
     let normSamples = [];
@@ -711,6 +725,8 @@
       document.querySelector("#hand option[value=left]").textContent = t("left");
       document.querySelector("#hand option[value=right]").textContent = t("right");
       cameraBtn.textContent = stream ? t("cameraOff") : t("cameraOn");
+      cameraSelect.setAttribute("aria-label", t("cameraPick"));
+      listCameras();
       for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
       if (normPhase === "count") showCount(String(countLeft));
       else if (normPhase === "record" || normPhase === "closing") showCount(t("normOverlay"), false);
@@ -1269,7 +1285,8 @@
       }
     }
 
-    async function inferLoopClient() {
+    async function inferLoopClient(session) {
+      const live = () => running && session === cameraSession;
       if (!window.PostureScore) {
         stageMsg.textContent = t("offline");
         return;
@@ -1279,12 +1296,13 @@
       try {
         stageMsg.textContent = t("warming");
         await ensurePoseLandmarker();
+        if (!live()) return;
         if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("waiting");
       } catch (_err) {
-        if (running) stageMsg.textContent = t("offline");
+        if (live()) stageMsg.textContent = t("offline");
         return;
       }
-      while (running) {
+      while (live()) {
         if (video.readyState < 2) {
           await new Promise((resolve) => requestAnimationFrame(resolve));
           continue;
@@ -1314,14 +1332,14 @@
           );
         } catch (_err) {
           if (acceptSample) normInflight = false;
-          if (!running) return;
+          if (!live()) return;
           noteNormFrame();
           if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("offline");
           await delay(400);
           continue;
         }
         if (acceptSample) normInflight = false;
-        if (!running) return;
+        if (!live()) return;
         if (acceptSample) rememberPose(payload);
         noteNormFrame();
         lastPayload = payload;
@@ -1334,14 +1352,15 @@
       }
     }
 
-    async function inferLoop() {
-      while (running) {
+    async function inferLoop(session) {
+      const live = () => running && session === cameraSession;
+      while (live()) {
         if (video.readyState < 2) {
           await new Promise((resolve) => requestAnimationFrame(resolve));
           continue;
         }
         const blob = await snapshot();
-        if (!running) return;
+        if (!live()) return;
         if (!blob) {
           await delay(200);
           noteNormFrame();
@@ -1366,7 +1385,7 @@
           if (response.status === 503) {
             inferBusy = false;
             if (acceptSample) normInflight = false;
-            if (!running) return;
+            if (!live()) return;
             noteNormFrame();
             if (!normPhase && performance.now() >= stageHold) stageMsg.textContent = t("warming");
             await delay(1000);
@@ -1377,7 +1396,7 @@
         } catch (err) {
           inferBusy = false;
           if (acceptSample) normInflight = false;
-          if (!running) return;
+          if (!live()) return;
           noteNormFrame();
           const network = err instanceof TypeError || err.name === "AbortError" || err.name === "TimeoutError";
           if (network && !normPhase && performance.now() >= stageHold) stageMsg.textContent = t("offline");
@@ -1386,7 +1405,7 @@
         }
         inferBusy = false;
         if (acceptSample) normInflight = false;
-        if (!running) return;
+        if (!live()) return;
         if (payload.skipped) {
           await delay(200);
           noteNormFrame();
@@ -1403,32 +1422,42 @@
       }
     }
 
-    async function startCamera() {
-      await loadConfig();
-      stageMsg.textContent = t("starting");
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
-      } catch (_err) {
-        stream = null;
-        stageMsg.textContent = t("denied");
-        return;
-      }
-      video.srcObject = stream;
-      await video.play();
-      running = true;
-      lastPayload = null;
-      frame.classList.add("live");
-      cameraBtn.textContent = t("cameraOff");
-      stageMsg.textContent = t("waiting");
-      requestAnimationFrame(paint);
-      if (inferMode === "client") inferLoopClient();
-      else inferLoop();
+    function videoConstraints(deviceId) {
+      const video = { width: { ideal: 1280 }, height: { ideal: 720 } };
+      if (deviceId) video.deviceId = { exact: deviceId };
+      else video.facingMode = "user";
+      return { video, audio: false };
     }
 
-    function stopCamera() {
+    async function listCameras() {
+      let found = [];
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videos = devices.filter((device) => device.kind === "videoinput" && device.deviceId);
+        if (videos.some((device) => (device.label || "").trim())) camerasKnown = true;
+        if (camerasKnown) found = videos;
+      } catch (_err) {
+        found = [];
+      }
+      const preferred = cameraSelect.value || localStorage.getItem(CAMERA_KEY) || "";
+      fillingCameras = true;
+      cameraSelect.replaceChildren();
+      const fallback = document.createElement("option");
+      fallback.value = "";
+      fallback.textContent = t("cameraDefault");
+      cameraSelect.append(fallback);
+      found.forEach((device, index) => {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent = (device.label || "").trim() || fill(t("cameraN"), index + 1);
+        cameraSelect.append(option);
+      });
+      cameraSelect.value = found.some((device) => device.deviceId === preferred) ? preferred : "";
+      fillingCameras = false;
+    }
+
+    function releaseStream() {
+      cameraSession += 1;
       running = false;
       dragId = null;
       cancelNorm();
@@ -1437,10 +1466,130 @@
       stream = null;
       video.srcObject = null;
       frame.classList.remove("live");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       prevHand = "";
       lastPayload = null;
       grace.sit = null;
       grace.pen = null;
+    }
+
+    async function openStream(deviceId) {
+      const attempts = [videoConstraints(deviceId)];
+      if (deviceId) attempts.push({ video: { deviceId: { exact: deviceId } }, audio: false });
+      let last = null;
+      for (const constraints of attempts) {
+        try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          last = err;
+          if (err.name === "NotAllowedError" || err.name === "NotFoundError") break;
+        }
+      }
+      throw last;
+    }
+
+    function revealCameras() {
+      if (camerasKnown) return listCameras();
+      if (revealing) return revealing;
+      revealing = (async () => {
+        let probe = null;
+        try {
+          probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          camerasKnown = true;
+        } catch (_err) {
+          return;
+        } finally {
+          if (probe) probe.getTracks().forEach((track) => track.stop());
+          revealing = null;
+        }
+        await listCameras();
+      })();
+      return revealing;
+    }
+
+    async function startCamera() {
+      releaseStream();
+      const session = cameraSession;
+      if (revealing) await revealing;
+      if (session !== cameraSession) return;
+      await loadConfig();
+      if (session !== cameraSession) return;
+      stageMsg.textContent = t("starting");
+      const preferred = cameraSelect.value || localStorage.getItem(CAMERA_KEY) || "";
+      let opened = null;
+      let openError = null;
+      try {
+        opened = await openStream(preferred);
+      } catch (err) {
+        openError = err;
+      }
+      if (session !== cameraSession) return;
+      const gone = openError && (openError.name === "NotFoundError" || openError.name === "OverconstrainedError");
+      if (!opened && preferred && gone) {
+        localStorage.removeItem(CAMERA_KEY);
+        fillingCameras = true;
+        cameraSelect.value = "";
+        fillingCameras = false;
+        try {
+          opened = await openStream("");
+        } catch (_err2) {
+          opened = null;
+        }
+      }
+      if (session !== cameraSession) {
+        if (opened) opened.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      if (!opened) {
+        frame.classList.remove("live");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        cameraBtn.textContent = t("cameraOn");
+        stageMsg.classList.remove("count");
+        stageMsg.textContent = t("denied");
+        paintStatus(null);
+        syncChrome();
+        return;
+      }
+      camerasKnown = true;
+      stream = opened;
+      video.srcObject = stream;
+      try {
+        await video.play();
+      } catch (_err) {
+        if (session !== cameraSession) return;
+        opened.getTracks().forEach((track) => track.stop());
+        if (stream === opened) {
+          stream = null;
+          video.srcObject = null;
+        }
+        cameraBtn.textContent = t("cameraOn");
+        stageMsg.textContent = t("denied");
+        paintStatus(null);
+        syncChrome();
+        return;
+      }
+      if (session !== cameraSession) {
+        opened.getTracks().forEach((track) => track.stop());
+        if (stream === opened) {
+          stream = null;
+          video.srcObject = null;
+        }
+        return;
+      }
+      running = true;
+      frame.classList.add("live");
+      cameraBtn.textContent = t("cameraOff");
+      stageMsg.textContent = t("waiting");
+      await listCameras();
+      if (session !== cameraSession) return;
+      requestAnimationFrame(paint);
+      if (inferMode === "client") inferLoopClient(session);
+      else inferLoop(session);
+    }
+
+    function stopCamera() {
+      releaseStream();
+      frame.classList.remove("live");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       cameraBtn.textContent = t("cameraOn");
       stageMsg.classList.remove("count");
@@ -1703,6 +1852,25 @@
       applyLang();
     });
     cameraBtn.addEventListener("click", () => (stream ? stopCamera() : startCamera()));
+    cameraSelect.addEventListener("pointerdown", (event) => {
+      if (camerasKnown) return;
+      event.preventDefault();
+      revealCameras().then(() => {
+        if (!camerasKnown || typeof cameraSelect.showPicker !== "function") return;
+        try {
+          cameraSelect.showPicker();
+        } catch (_err) {
+          /* The permission prompt consumes the click; the next click opens the filled list. */
+        }
+      });
+    });
+    cameraSelect.addEventListener("change", () => {
+      if (fillingCameras) return;
+      if (cameraSelect.value) localStorage.setItem(CAMERA_KEY, cameraSelect.value);
+      else localStorage.removeItem(CAMERA_KEY);
+      if (stream) startCamera();
+    });
+    navigator.mediaDevices?.addEventListener("devicechange", () => listCameras());
     document.getElementById("controls").addEventListener("submit", (event) => event.preventDefault());
     document.getElementById("controls").addEventListener("input", (event) => {
       const id = event.target.classList.contains("num") ? event.target.dataset.for : event.target.id;
