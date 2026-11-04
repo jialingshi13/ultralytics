@@ -1,24 +1,20 @@
-# Quality path when this directory is the service root.
-# YOLO26l-pose at 640 on 12 CPU / 24 GB. Do not scale out: the smoother lives in this process.
+# Free plan when this directory is the service root.
+# Pose runs in the browser. Do not install requirements-server.txt here.
 services:
   - type: web
     name: posture-web
     runtime: python
     repo: https://github.com/jialingshi13/ultralytics
     branch: feat/posture-web-render
-    plan: 12c-24g
+    plan: free
     numInstances: 1
-    buildCommand: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements-server.txt && python -c "import torch; assert torch.version.cuda is None, torch.__version__; from ultralytics import YOLO; YOLO('yolo26l-pose.pt')"
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 server:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 server:app
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: POSTURE_INFER
-        value: server
-      - key: POSTURE_MODEL
-        value: yolo26l-pose.pt
-      - key: POSTURE_IMGSZ
-        value: "640"
+        value: client
       - key: POSTURE_PRELOAD
-        value: "1"
+        value: "0"
